@@ -77,7 +77,7 @@ fn rejects_fewer_than_five_players() {
 #[test]
 fn werewolf_count_scales_with_player_count() {
     for (players, wolves) in [(5, 1), (7, 1), (8, 2), (11, 2), (12, 3)] {
-        let g = Engine::new_seeded(players, 42).unwrap();
+        let g = Engine::new(players).unwrap();
         let (villagers, actual_wolves) = g.alive_count_by_role();
         assert_eq!(actual_wolves, wolves, "wolves for {players} players");
         assert_eq!(
@@ -95,26 +95,17 @@ fn werewolf_count_scales_with_player_count() {
 }
 
 #[test]
-fn seeded_deal_is_reproducible_and_always_valid() {
-    let roles_of = |seed| {
-        Engine::new_seeded(9, seed)
-            .unwrap()
-            .players()
-            .iter()
-            .map(|p| p.role())
-            .collect::<Vec<_>>()
-    };
-    assert_eq!(roles_of(12345), roles_of(12345));
-
-    // Every seed produces a legal roster with the right counts.
-    for seed in 0..200 {
-        let (villagers, wolves) = Engine::new_seeded(10, seed).unwrap().alive_count_by_role();
-        assert_eq!((villagers, wolves), (8, 2));
+fn random_deals_are_always_valid_and_do_reshuffle() {
+    // Every deal is a legal roster with the right counts.
+    let mut deals = Vec::new();
+    for _ in 0..200 {
+        let g = Engine::new(10).unwrap();
+        assert_eq!(g.alive_count_by_role(), (8, 2));
+        deals.push(g.players().iter().map(|p| p.role()).collect::<Vec<_>>());
     }
 
-    // Different seeds do actually reshuffle.
-    let base = roles_of(1);
-    assert!((2..50).any(|seed| roles_of(seed) != base));
+    // A shuffle that always dealt the same order would fail here.
+    assert!(deals.iter().any(|d| *d != deals[0]));
 }
 
 #[test]
@@ -575,4 +566,134 @@ fn identical_rosters_and_commands_produce_identical_games() {
 
     assert_eq!(a, b);
     assert_eq!(a.winner(), Some(Winner::Villagers));
+}
+
+// ---------------------------------------------------------------------------
+// 29–30: unscripted full games that just have to end with a consistent winner
+// ---------------------------------------------------------------------------
+
+/// A test-local SplitMix64, since the crate's own PRNG is `pub(crate)`.
+struct Rng(u64);
+
+impl Rng {
+    fn next_u64(&mut self) -> u64 {
+        self.0 = self.0.wrapping_add(0x9E37_79B9_7F4A_7C15);
+        let mut z = self.0;
+        z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+        z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
+        z ^ (z >> 31)
+    }
+
+    /// One element of a non-empty slice; modulo bias does not matter for a test.
+    fn pick(&mut self, ids: &[PlayerId]) -> PlayerId {
+        ids[(self.next_u64() % ids.len() as u64) as usize]
+    }
+}
+
+/// A roster of `n` players with the same wolf count `Engine::new` would use.
+fn roster(n: usize) -> Vec<Role> {
+    let wolves = (n / 4).max(1);
+    let mut roles = vec![W; wolves];
+    roles.extend(std::iter::repeat_n(V, n - wolves));
+    roles
+}
+
+/// The crowned winner must match who is actually left standing.
+fn assert_winner_matches_survivors(g: &Engine) {
+    assert!(g.is_over());
+    assert_eq!(g.phase(), Phase::Ended);
+    assert_eq!(g.pending_actors(), no_ids());
+
+    let (villagers, wolves) = g.alive_count_by_role();
+    match g.winner().expect("an ended game has a winner") {
+        Winner::Villagers => assert_eq!(wolves, 0),
+        Winner::Werewolves => assert!(wolves > 0 && wolves >= villagers),
+    }
+}
+
+/// Play one whole game to its end: the pack always agrees on a random target;
+/// the town votes randomly, or unanimously for one random target when `unanimous_town`.
+fn play_out(g: &mut Engine, rng: &mut Rng, unanimous_town: bool) {
+    // A unanimous pack kills one player every night, so `players` phases is a hard ceiling.
+    for _ in 0..(g.players().len() * 2 + 4) {
+        match g.phase() {
+            Phase::Night => {
+                let victim = rng.pick(&living_ids(g));
+                for wolf in living_wolf_ids(g) {
+                    g.night_action(wolf, victim).expect("wolf night action");
+                }
+                assert_eq!(
+                    g.resolve_night().expect("night resolves"),
+                    NightOutcome::Killed(victim),
+                    "a unanimous pack never splits",
+                );
+            }
+            Phase::Day if unanimous_town => {
+                let target = rng.pick(&living_ids(g));
+                for voter in living_ids(g) {
+                    g.vote(voter, target).expect("vote");
+                }
+                assert_eq!(
+                    g.resolve_day().expect("day resolves"),
+                    DayOutcome::Eliminated(target),
+                    "a unanimous town always eliminates its target",
+                );
+            }
+            Phase::Day => {
+                let living = living_ids(g);
+                for voter in &living {
+                    let target = rng.pick(&living);
+                    g.vote(*voter, target).expect("vote");
+                }
+                g.resolve_day().expect("day resolves");
+            }
+            Phase::Ended => {
+                assert_winner_matches_survivors(g);
+                return;
+            }
+        }
+    }
+    panic!("game did not end within the phase cap");
+}
+
+/// The pack agrees; the town votes at random, so most days tie and eliminate nobody.
+#[test]
+fn random_town_games_always_end_with_a_consistent_winner() {
+    let mut seen_villagers = false;
+    let mut seen_werewolves = false;
+
+    for n in Engine::MIN_PLAYERS..=12 {
+        for seed in 0..50 {
+            let mut g = game(&roster(n));
+            play_out(&mut g, &mut Rng(seed), false);
+            match g.winner().unwrap() {
+                Winner::Villagers => seen_villagers = true,
+                Winner::Werewolves => seen_werewolves = true,
+            }
+        }
+    }
+
+    assert!(seen_villagers, "no sweep game was a villager win");
+    assert!(seen_werewolves, "no sweep game was a werewolf win");
+}
+
+/// The pack agrees and so does the town: every night and every day removes exactly one player.
+#[test]
+fn unanimous_town_games_always_end_with_a_consistent_winner() {
+    let mut seen_villagers = false;
+    let mut seen_werewolves = false;
+
+    for n in Engine::MIN_PLAYERS..=12 {
+        for seed in 0..50 {
+            let mut g = game(&roster(n));
+            play_out(&mut g, &mut Rng(seed), true);
+            match g.winner().unwrap() {
+                Winner::Villagers => seen_villagers = true,
+                Winner::Werewolves => seen_werewolves = true,
+            }
+        }
+    }
+
+    assert!(seen_villagers, "no sweep game was a villager win");
+    assert!(seen_werewolves, "no sweep game was a werewolf win");
 }

@@ -59,11 +59,6 @@ impl Engine {
 
     /// Build a game for `player_count` players with random roles; wolves are `max(1, player_count / 4)`.
     pub fn new(player_count: usize) -> Result<Self, GameError> {
-        Self::new_seeded(player_count, time_seed())
-    }
-
-    /// Like [`new`](Self::new) but with an explicit PRNG seed for a reproducible deal.
-    pub fn new_seeded(player_count: usize, seed: u64) -> Result<Self, GameError> {
         if player_count < Self::MIN_PLAYERS {
             return Err(GameError::TooFewPlayers {
                 got: player_count,
@@ -75,12 +70,12 @@ impl Engine {
         let mut roles = Vec::with_capacity(player_count);
         roles.extend(std::iter::repeat_n(Role::Werewolf, wolves));
         roles.extend(std::iter::repeat_n(Role::Villager, player_count - wolves));
-        SplitMix64::new(seed).shuffle(&mut roles);
+        SplitMix64::new(time_seed()).shuffle(&mut roles);
 
         Ok(Self::from_roles(&roles))
     }
 
-    /// Build a game from an exact role list (`roles[i]` is `Pi`), rejecting rosters the game could never begin from.
+    /// Build a game from an exact role list (`roles[i]` is `Pi`), rejecting rosters the game could never begin from; this is the deterministic constructor tests use.
     pub fn with_roles(roles: &[Role]) -> Result<Self, GameError> {
         if roles.len() < Self::MIN_PLAYERS {
             return Err(GameError::TooFewPlayers {
