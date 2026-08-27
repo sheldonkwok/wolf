@@ -26,10 +26,8 @@
 //! ```
 
 mod engine;
-mod error;
-mod player;
 pub mod rng;
 
-pub use engine::{DayOutcome, Engine, NightOutcome, Phase, Winner};
-pub use error::GameError;
-pub use player::{Player, PlayerId, Role};
+pub use engine::{
+    DayOutcome, Engine, GameError, NightOutcome, Phase, Player, PlayerId, Role, Winner,
+};

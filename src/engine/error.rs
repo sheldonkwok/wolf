@@ -1,7 +1,6 @@
 use std::fmt;
 
-use crate::PlayerId;
-use crate::engine::Phase;
+use super::{Phase, PlayerId};
 
 /// Errors from constructing or commanding an [`Engine`](crate::Engine); on `Err` the game state is unchanged.
 #[derive(Debug, Clone, PartialEq, Eq)]

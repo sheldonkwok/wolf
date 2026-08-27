@@ -1,8 +1,14 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use crate::error::GameError;
-use crate::player::{Player, PlayerId, Role};
 use crate::rng::{SplitMix64, time_seed};
+
+mod error;
+mod player;
+#[cfg(test)]
+mod tests;
+
+pub use error::GameError;
+pub use player::{Player, PlayerId, Role};
 
 /// Which half of the game loop we are in.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
