@@ -5,6 +5,12 @@
         "hooks": [
           {
             "type": "command",
+            "command": "cargo fmt 2>&1 | tail -30",
+            "statusMessage": "Running cargo fmt",
+            "timeout": 120
+          },
+          {
+            "type": "command",
             "command": "cargo test --quiet 2>&1 | tail -30",
             "statusMessage": "Running cargo test",
             "timeout": 300
