@@ -28,7 +28,7 @@
 mod engine;
 mod error;
 mod player;
-mod rng;
+pub mod rng;
 
 pub use engine::{DayOutcome, Engine, NightOutcome, Phase, Winner};
 pub use error::GameError;

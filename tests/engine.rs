@@ -109,6 +109,32 @@ fn random_deals_are_always_valid_and_do_reshuffle() {
 }
 
 #[test]
+fn with_seed_is_reproducible_and_seed_sensitive() {
+    let roles = |seed| {
+        Engine::with_seed(9, seed)
+            .unwrap()
+            .players()
+            .iter()
+            .map(|p| p.role())
+            .collect::<Vec<_>>()
+    };
+
+    // Same seed, same deal, every time.
+    assert_eq!(roles(1234), roles(1234));
+
+    // Different seeds spread the wolves around rather than always dealing the same order.
+    let deals = (0..50).map(roles).collect::<Vec<_>>();
+    assert!(deals.iter().any(|d| *d != deals[0]));
+
+    // Every seeded deal is still a legal, correctly-sized roster.
+    for seed in 0..50 {
+        let g = Engine::with_seed(9, seed).unwrap();
+        assert_eq!(g.alive_count_by_role(), (7, 2));
+        assert_eq!(g.phase(), Phase::Night);
+    }
+}
+
+#[test]
 fn with_roles_rejects_unstartable_rosters() {
     assert_eq!(
         Engine::with_roles(&[V, V, V, V]).unwrap_err(),

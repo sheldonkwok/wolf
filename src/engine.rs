@@ -59,6 +59,11 @@ impl Engine {
 
     /// Build a game for `player_count` players with random roles; wolves are `max(1, player_count / 4)`.
     pub fn new(player_count: usize) -> Result<Self, GameError> {
+        Self::with_seed(player_count, time_seed())
+    }
+
+    /// Like [`Engine::new`], but the deal is drawn from `seed` so a game can be reproduced.
+    pub fn with_seed(player_count: usize, seed: u64) -> Result<Self, GameError> {
         if player_count < Self::MIN_PLAYERS {
             return Err(GameError::TooFewPlayers {
                 got: player_count,
@@ -70,7 +75,7 @@ impl Engine {
         let mut roles = Vec::with_capacity(player_count);
         roles.extend(std::iter::repeat_n(Role::Werewolf, wolves));
         roles.extend(std::iter::repeat_n(Role::Villager, player_count - wolves));
-        SplitMix64::new(time_seed()).shuffle(&mut roles);
+        SplitMix64::new(seed).shuffle(&mut roles);
 
         Ok(Self::from_roles(&roles))
     }

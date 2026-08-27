@@ -1,11 +1,11 @@
 //! A tiny deterministic SplitMix64 PRNG (one `u64` of state) so the crate stays dependency-free.
 
-pub(crate) struct SplitMix64 {
+pub struct SplitMix64 {
     state: u64,
 }
 
 impl SplitMix64 {
-    pub(crate) fn new(seed: u64) -> Self {
+    pub fn new(seed: u64) -> Self {
         SplitMix64 { state: seed }
     }
 
@@ -17,8 +17,8 @@ impl SplitMix64 {
         z ^ (z >> 31)
     }
 
-    /// Uniform integer in `0..bound` (non-zero); rejection sampling avoids modulo bias.
-    fn below(&mut self, bound: u64) -> u64 {
+    /// Uniform integer in `0..bound`; rejection sampling avoids modulo bias. Panics if `bound` is zero.
+    pub fn below(&mut self, bound: u64) -> u64 {
         let zone = u64::MAX - (u64::MAX % bound);
         loop {
             let r = self.next_u64();
@@ -28,8 +28,21 @@ impl SplitMix64 {
         }
     }
 
+    /// `true` with probability `percent/100`; `percent >= 100` is always `true`.
+    pub fn chance(&mut self, percent: u64) -> bool {
+        self.below(100) < percent
+    }
+
+    /// A uniformly random element of `slice`, or `None` when it is empty.
+    pub fn choose<'a, T>(&mut self, slice: &'a [T]) -> Option<&'a T> {
+        if slice.is_empty() {
+            return None;
+        }
+        Some(&slice[self.below(slice.len() as u64) as usize])
+    }
+
     /// In-place Fisher–Yates shuffle.
-    pub(crate) fn shuffle<T>(&mut self, slice: &mut [T]) {
+    pub fn shuffle<T>(&mut self, slice: &mut [T]) {
         for i in (1..slice.len()).rev() {
             let j = self.below(i as u64 + 1) as usize;
             slice.swap(i, j);
@@ -38,7 +51,7 @@ impl SplitMix64 {
 }
 
 /// A seed derived from the wall clock, for the non-deterministic constructor.
-pub(crate) fn time_seed() -> u64 {
+pub fn time_seed() -> u64 {
     use std::time::{SystemTime, UNIX_EPOCH};
     SystemTime::now()
         .duration_since(UNIX_EPOCH)

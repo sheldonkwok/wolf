@@ -7,3 +7,7 @@ description = "A werewolf (mafia) game engine for chat apps"
 [lib]
 name = "wolf"
 path = "src/lib.rs"
+
+[[bin]]
+name = "wolf"
+path = "src/main.rs"
