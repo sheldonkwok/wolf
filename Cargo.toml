@@ -1,0 +1,9 @@
+[package]
+name = "wolf"
+version = "0.1.0"
+edition = "2024"
+description = "A werewolf (mafia) game engine for chat apps"
+
+[lib]
+name = "wolf"
+path = "src/lib.rs"
