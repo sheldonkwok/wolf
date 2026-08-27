@@ -23,10 +23,12 @@ pub enum Winner {
 }
 
 /// The result of resolving a night.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum NightOutcome {
     /// The werewolves' target was eliminated.
     Killed(PlayerId),
+    /// The pack named more than one target; nobody died and they pick again.
+    NoConsensus { targets: Vec<PlayerId> },
 }
 
 /// The result of resolving a day.
@@ -38,11 +40,7 @@ pub enum DayOutcome {
     NoElimination,
 }
 
-/// The werewolf game engine — it owns the whole game state and plays the part of
-/// the moderator. Build one with [`Engine::new`] (random roles) or
-/// [`Engine::with_roles`] (an exact roster, for tests), then drive it with
-/// [`night_action`](Self::night_action) / [`resolve_night`](Self::resolve_night)
-/// and [`vote`](Self::vote) / [`resolve_day`](Self::resolve_day).
+/// The game engine and moderator: owns all state, built with [`Engine::new`] or [`Engine::with_roles`] and driven by the night/day commands.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Engine {
     players: Vec<Player>,
@@ -59,16 +57,12 @@ impl Engine {
     /// The fewest players a game can be built with.
     pub const MIN_PLAYERS: usize = 5;
 
-    /// Build a game for `player_count` players with roles dealt at random.
-    ///
-    /// The werewolf count is `max(1, player_count / 4)`: 5–7 players get one
-    /// wolf, 8–11 get two, 12–15 get three.
+    /// Build a game for `player_count` players with random roles; wolves are `max(1, player_count / 4)`.
     pub fn new(player_count: usize) -> Result<Self, GameError> {
         Self::new_seeded(player_count, time_seed())
     }
 
-    /// Like [`new`](Self::new) but with an explicit PRNG seed, so the deal is
-    /// reproducible.
+    /// Like [`new`](Self::new) but with an explicit PRNG seed for a reproducible deal.
     pub fn new_seeded(player_count: usize, seed: u64) -> Result<Self, GameError> {
         if player_count < Self::MIN_PLAYERS {
             return Err(GameError::TooFewPlayers {
@@ -86,11 +80,7 @@ impl Engine {
         Ok(Self::from_roles(&roles))
     }
 
-    /// Build a game from an exact list of roles. `roles[i]` becomes player `Pi`.
-    ///
-    /// Rejects rosters the game could never begin from: fewer than
-    /// [`MIN_PLAYERS`](Self::MIN_PLAYERS) players, no werewolves, or werewolves
-    /// already at or above parity with the villagers.
+    /// Build a game from an exact role list (`roles[i]` is `Pi`), rejecting rosters the game could never begin from.
     pub fn with_roles(roles: &[Role]) -> Result<Self, GameError> {
         if roles.len() < Self::MIN_PLAYERS {
             return Err(GameError::TooFewPlayers {
@@ -129,11 +119,7 @@ impl Engine {
 
     // ----- commands -------------------------------------------------------
 
-    /// Record one werewolf naming `target` for tonight's kill.
-    ///
-    /// Every living werewolf must call this, all naming the same target, before
-    /// [`resolve_night`](Self::resolve_night) will succeed. A wolf cannot change
-    /// their pick once made.
+    /// Record one werewolf naming `target` for tonight's kill; a wolf may overwrite their pick freely until the night resolves.
     pub fn night_action(&mut self, wolf: PlayerId, target: PlayerId) -> Result<(), GameError> {
         self.ensure_phase(Phase::Night)?;
 
@@ -142,16 +128,12 @@ impl Engine {
             return Err(GameError::NotAWerewolf(wolf));
         }
         self.require_alive(target)?;
-        if self.night_picks.contains_key(&wolf) {
-            return Err(GameError::AlreadyActed(wolf));
-        }
 
         self.night_picks.insert(wolf, target);
         Ok(())
     }
 
-    /// Resolve the night: eliminate the werewolves' agreed target, check for a
-    /// win, and move to [`Phase::Day`] (or [`Phase::Ended`]).
+    /// Resolve the night: eliminate the wolves' agreed target, check for a win, advance to [`Phase::Day`] or [`Phase::Ended`].
     pub fn resolve_night(&mut self) -> Result<NightOutcome, GameError> {
         self.ensure_phase(Phase::Night)?;
 
@@ -170,7 +152,11 @@ impl Engine {
             .map(|id| self.night_picks[id])
             .collect();
         if targets.len() != 1 {
-            return Err(GameError::PackNotUnanimous);
+            // A split pack is not an error: wipe the board and let them pick again.
+            self.night_picks.clear();
+            return Ok(NightOutcome::NoConsensus {
+                targets: targets.into_iter().collect(),
+            });
         }
         let target = targets.into_iter().next().expect("exactly one target");
 
@@ -183,8 +169,7 @@ impl Engine {
         Ok(NightOutcome::Killed(target))
     }
 
-    /// Record `voter`'s day vote for `target`. One vote per living player; a vote
-    /// cannot be changed once cast.
+    /// Record `voter`'s day vote for `target`; one final vote per living player.
     pub fn vote(&mut self, voter: PlayerId, target: PlayerId) -> Result<(), GameError> {
         self.ensure_phase(Phase::Day)?;
 
@@ -198,9 +183,7 @@ impl Engine {
         Ok(())
     }
 
-    /// Resolve the day: eliminate the player with the most votes (a tie for the
-    /// lead eliminates nobody), check for a win, and move to [`Phase::Night`]
-    /// with the round number incremented (or [`Phase::Ended`]).
+    /// Resolve the day: eliminate the vote leader (a tie for the lead eliminates nobody), check for a win, advance to the next [`Phase::Night`] or [`Phase::Ended`].
     pub fn resolve_day(&mut self) -> Result<DayOutcome, GameError> {
         self.ensure_phase(Phase::Day)?;
 
@@ -245,9 +228,7 @@ impl Engine {
 
     // ----- inspection ---------------------------------------------------------
 
-    /// A convenience wrapper: `engine.player(3)` is `PlayerId(3)`. The id is not
-    /// validated here — an out-of-range id simply produces
-    /// [`GameError::UnknownPlayer`] when used.
+    /// Convenience wrapper: `engine.player(3)` is `PlayerId(3)`, validated only when used.
     pub fn player(&self, index: usize) -> PlayerId {
         PlayerId(index)
     }
@@ -257,8 +238,7 @@ impl Engine {
         self.phase
     }
 
-    /// The current round number, starting at 1 and incremented each time a day
-    /// resolves into a new night.
+    /// The current round number, starting at 1 and bumped when a day resolves into a night.
     pub fn round(&self) -> usize {
         self.round
     }
@@ -288,8 +268,7 @@ impl Engine {
         self.players.get(id.index()).is_some_and(|p| p.is_alive())
     }
 
-    /// The role of `id`. The engine is the moderator, so it has full
-    /// information; keeping roles secret from players is the chat adapter's job.
+    /// The role of `id`; the engine is the moderator, so keeping roles secret is the chat adapter's job.
     pub fn role_of(&self, id: PlayerId) -> Result<Role, GameError> {
         self.players
             .get(id.index())
@@ -310,9 +289,7 @@ impl Engine {
         (villagers, wolves)
     }
 
-    /// Who the engine is still waiting on: living werewolves who have not named a
-    /// target (Night), living players who have not voted (Day), or nobody
-    /// (Ended). This is what a chat bot nudges.
+    /// Who the engine still waits on and a chat bot nudges: unacted wolves (Night), non-voters (Day), or nobody (Ended).
     pub fn pending_actors(&self) -> Vec<PlayerId> {
         match self.phase {
             Phase::Night => self
@@ -329,11 +306,19 @@ impl Engine {
         }
     }
 
-    /// The votes cast so far this day, as `voter -> target`. Empty outside the
-    /// day phase; cleared at every phase transition.
+    /// Votes cast so far this day as `voter -> target`; empty outside the day phase.
     pub fn current_votes(&self) -> BTreeMap<PlayerId, PlayerId> {
         if self.phase == Phase::Day {
             self.day_votes.clone()
+        } else {
+            BTreeMap::new()
+        }
+    }
+
+    /// The pack's picks so far this night as `wolf -> target`; empty outside the night phase.
+    pub fn current_night_picks(&self) -> BTreeMap<PlayerId, PlayerId> {
+        if self.phase == Phase::Night {
+            self.night_picks.clone()
         } else {
             BTreeMap::new()
         }
@@ -374,8 +359,7 @@ impl Engine {
             .collect()
     }
 
-    /// Decide the game if a win condition is now met. Villager check first, so
-    /// lynching the last wolf wins even when it would otherwise reach parity.
+    /// Decide the game if a win condition is now met; the no-wolves check comes first so a final lynch wins.
     fn settle(&mut self) {
         let (villagers, wolves) = self.alive_count_by_role();
         let result = if wolves == 0 {

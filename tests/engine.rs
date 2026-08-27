@@ -1,8 +1,4 @@
-//! Integration tests for the werewolf game engine.
-//!
-//! The bulk of these drive whole games to a conclusion, covering several
-//! distinct routes to a villager win and to a werewolf win, plus the phase /
-//! inspection invariants and every rejection path for bad commands.
+//! Integration tests that drive whole games to each win condition, plus phase/inspection invariants and every bad-command rejection path.
 
 use wolf::Role::{Villager as V, Werewolf as W};
 use wolf::{DayOutcome, Engine, GameError, NightOutcome, Phase, PlayerId, Role, Winner};
@@ -16,8 +12,7 @@ fn game(roles: &[Role]) -> Engine {
     Engine::with_roles(roles).expect("roster should be valid")
 }
 
-/// Shorthand for a player id. Kept as a free function so it can be used inside
-/// `&mut engine` calls without a borrow conflict.
+/// Shorthand for a player id; a free function so it works inside `&mut engine` calls.
 fn p(index: usize) -> PlayerId {
     PlayerId(index)
 }
@@ -188,22 +183,29 @@ fn dead_players_cannot_act_or_be_targeted() {
 }
 
 #[test]
-fn a_player_cannot_act_or_vote_twice() {
+fn a_day_vote_cannot_be_changed_once_cast() {
     let mut g = game(&[W, W, V, V, V, V]);
-    g.night_action(p(0), p(2)).unwrap();
-    assert_eq!(
-        g.night_action(p(0), p(3)).unwrap_err(),
-        GameError::AlreadyActed(p(0))
-    );
-
-    g.night_action(p(1), p(2)).unwrap();
-    g.resolve_night().unwrap();
+    wolves_kill(&mut g, p(2));
 
     g.vote(p(1), p(0)).unwrap();
     assert_eq!(
         g.vote(p(1), p(3)).unwrap_err(),
         GameError::AlreadyActed(p(1))
     );
+}
+
+#[test]
+fn a_wolf_may_overwrite_their_night_pick() {
+    let mut g = game(&[W, W, V, V, V, V]);
+    g.night_action(p(0), p(2)).unwrap();
+    g.night_action(p(1), p(3)).unwrap();
+    // P0 changes their mind to match P1; the pack now agrees.
+    g.night_action(p(0), p(3)).unwrap();
+    assert_eq!(
+        g.current_night_picks(),
+        [(p(0), p(3)), (p(1), p(3))].into_iter().collect()
+    );
+    assert_eq!(g.resolve_night().unwrap(), NightOutcome::Killed(p(3)));
 }
 
 #[test]
@@ -260,18 +262,48 @@ fn resolve_night_waits_for_every_wolf() {
 }
 
 #[test]
-fn a_split_pack_cannot_resolve_the_night() {
+fn a_split_pack_repicks_instead_of_deadlocking() {
     let mut g = game(&[W, W, V, V, V, V]);
     g.night_action(p(0), p(2)).unwrap();
     g.night_action(p(1), p(3)).unwrap();
-    assert_eq!(g.resolve_night().unwrap_err(), GameError::PackNotUnanimous);
-    assert_eq!(g.phase(), Phase::Night);
-    // Picks are retained and cannot be overwritten: the pack must agree from the
-    // first submission.
     assert_eq!(
-        g.night_action(p(0), p(3)).unwrap_err(),
-        GameError::AlreadyActed(p(0))
+        g.resolve_night().unwrap(),
+        NightOutcome::NoConsensus {
+            targets: vec![p(2), p(3)],
+        }
     );
+    // Nobody died, the night stands, and both wolves owe a fresh pick.
+    assert_eq!(g.phase(), Phase::Night);
+    assert_eq!(g.round(), 1);
+    assert_eq!(living_ids(&g), vec![p(0), p(1), p(2), p(3), p(4), p(5)]);
+    assert_eq!(g.pending_actors(), vec![p(0), p(1)]);
+    assert!(g.current_night_picks().is_empty());
+
+    // They agree the second time around and the kill lands.
+    g.night_action(p(0), p(3)).unwrap();
+    g.night_action(p(1), p(3)).unwrap();
+    assert_eq!(g.resolve_night().unwrap(), NightOutcome::Killed(p(3)));
+    assert_eq!(g.phase(), Phase::Day);
+}
+
+#[test]
+fn resolve_night_still_waits_on_a_silent_wolf_before_judging_the_pack() {
+    let mut g = game(&[W, W, V, V, V, V]);
+    g.night_action(p(0), p(2)).unwrap();
+    // P1 has not picked at all: that is incomplete, not a split.
+    assert_eq!(
+        g.resolve_night().unwrap_err(),
+        GameError::ActionsIncomplete {
+            waiting_on: vec![p(1)],
+        }
+    );
+}
+
+#[test]
+fn a_lone_wolf_never_reports_no_consensus() {
+    let mut g = game(&[W, V, V, V, V]);
+    g.night_action(p(0), p(1)).unwrap();
+    assert_eq!(g.resolve_night().unwrap(), NightOutcome::Killed(p(1)));
 }
 
 #[test]
@@ -334,8 +366,7 @@ fn villagers_win_by_lynching_both_wolves_on_successive_days() {
 
 #[test]
 fn villagers_win_on_the_last_possible_day() {
-    // Six players, one wolf. The town wastes days on tied votes while the wolf
-    // whittles them down, then lynches the wolf when only P0, P4, P5 remain.
+    // Six players, one wolf: the town ties votes while the wolf whittles them down, then lynches it at P0, P4, P5.
     let mut g = game(&[W, V, V, V, V, V]);
     wolves_kill(&mut g, p(1));
     town_ties(&mut g);
@@ -360,8 +391,7 @@ fn villagers_win_when_the_pack_devours_its_own() {
 
 #[test]
 fn villagers_can_win_without_losing_anyone() {
-    // Nine players, three wolves. The wolves keep killing each other; the town
-    // lynches one. Every villager is still standing at the end.
+    // Nine players, three wolves: the wolves kill each other and the town lynches one, leaving every villager alive.
     let mut g = game(&[W, W, W, V, V, V, V, V, V]);
     wolves_kill(&mut g, p(2)); // wolves kill wolf P2
     town_lynches(&mut g, p(1)); // town lynches wolf P1

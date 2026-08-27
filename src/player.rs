@@ -1,8 +1,6 @@
 use std::fmt;
 
-/// A stable handle to a player, assigned at construction as `0..player_count`.
-///
-/// Displays as `P0`, `P1`, ... which is handy in test output and log lines.
+/// A stable player handle assigned as `0..player_count`; displays as `P0`, `P1`, ...
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct PlayerId(pub usize);
 

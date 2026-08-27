@@ -1,10 +1,6 @@
-//! Wolf — a werewolf / mafia game engine.
+//! Wolf — a werewolf / mafia game engine: two roles ([`Role::Villager`], [`Role::Werewolf`]) with the [`Engine`] as moderator, owning all state behind read-only accessors and validating every command.
 //!
-//! This first slice implements the simplest rule set: two roles, [`Role::Villager`]
-//! and [`Role::Werewolf`]. The [`Engine`] plays the part of the moderator from the
-//! rules: it owns the full game state, exposes read-only accessors so a chat bot
-//! can render the game, and moves state forward through a small set of commands
-//! that validate every input.
+//! A wolf may revise their night pick at any time before the night resolves; a split pack resolves to [`NightOutcome::NoConsensus`] and picks again rather than deadlocking.
 //!
 //! ```
 //! use wolf::{Engine, Role, Winner};

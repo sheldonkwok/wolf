@@ -8,6 +8,7 @@ The rules can be found in @rules.md
 Rust
 
 
+
 ## Components
 ### Game Engine
 The game engine needs to be highly testable and inspectable. 
@@ -16,3 +17,7 @@ It should be able to report the state of game status.
 There are functions that can be called on the instance to move state forward.
 It needs to handle incorrect commands like invalid players targeted or commands that have already been played.
 The engine is functionally the moderator from the rules.
+
+
+## Style
+Comments can be maximum one line

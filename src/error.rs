@@ -3,9 +3,7 @@ use std::fmt;
 use crate::PlayerId;
 use crate::engine::Phase;
 
-/// Everything that can go wrong when constructing an [`Engine`](crate::Engine) or
-/// issuing a command to it. Commands are all-or-nothing: on `Err` the game state
-/// is left exactly as it was.
+/// Errors from constructing or commanding an [`Engine`](crate::Engine); on `Err` the game state is unchanged.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum GameError {
     /// Fewer than [`Engine::MIN_PLAYERS`](crate::Engine::MIN_PLAYERS) players.
@@ -20,12 +18,10 @@ pub enum GameError {
     NotAWerewolf(PlayerId),
     /// The command is not legal in the current phase.
     WrongPhase { expected: Phase, actual: Phase },
-    /// This player already submitted their action or vote this phase.
+    /// This player already cast their day vote, which is final.
     AlreadyActed(PlayerId),
     /// Resolution was attempted before every required actor had acted.
     ActionsIncomplete { waiting_on: Vec<PlayerId> },
-    /// The living werewolves did not all name the same target.
-    PackNotUnanimous,
     /// The game is over; no further commands are accepted.
     GameOver,
 }
@@ -50,7 +46,6 @@ impl fmt::Display for GameError {
             GameError::ActionsIncomplete { waiting_on } => {
                 write!(f, "still waiting on {waiting_on:?}")
             }
-            GameError::PackNotUnanimous => write!(f, "the werewolves did not agree on a target"),
             GameError::GameOver => write!(f, "the game is over"),
         }
     }
