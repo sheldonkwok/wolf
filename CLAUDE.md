@@ -18,6 +18,11 @@ There are functions that can be called on the instance to move state forward.
 It needs to handle incorrect commands like invalid players targeted or commands that have already been played.
 The engine is functionally the moderator from the rules.
 
+### Lobby
+A lobby is a group of players.
+It provides a place for players to wait before the game starts.
+The first person who joins the lobby is the host by default.
+The host can decide when to start the game, which creates a new instance of the game engine.
 
 ## Style
 Comments can be maximum one line

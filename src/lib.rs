@@ -26,8 +26,10 @@
 //! ```
 
 mod engine;
+mod lobby;
 pub mod rng;
 
 pub use engine::{
     DayOutcome, Engine, GameError, NightOutcome, Phase, Player, PlayerId, Role, Winner,
 };
+pub use lobby::{Lobby, LobbyError, LobbyState, Member, UserId};
