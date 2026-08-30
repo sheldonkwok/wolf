@@ -14,6 +14,12 @@
             "command": "cargo test --quiet 2>&1 | tail -30",
             "statusMessage": "Running cargo test",
             "timeout": 300
+          },
+          {
+            "type": "command",
+            "command": "test -f ts/native/index.js && bun test 2>&1 | tail -30 || echo 'skip bun test: run `bun run build:dev` first'",
+            "statusMessage": "Running bun test",
+            "timeout": 300
           }
         ]
       }

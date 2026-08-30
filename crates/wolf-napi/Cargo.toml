@@ -1,0 +1,16 @@
+[package]
+name = "wolf-napi"
+version = "0.1.0"
+edition = "2024"
+description = "napi-rs bindings exposing the wolf engine to Node/Bun"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+napi = { version = "3", default-features = false, features = ["napi6"] }
+napi-derive = "3"
+wolf = { path = "../wolf" }
+
+[build-dependencies]
+napi-build = "2"

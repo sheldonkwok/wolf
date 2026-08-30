@@ -1,0 +1,20 @@
+{
+  "name": "wolf",
+  "version": "0.1.0",
+  "description": "Bun TypeScript front layer for the wolf werewolf engine",
+  "type": "module",
+  "private": true,
+  "napi": {
+    "binaryName": "wolf"
+  },
+  "scripts": {
+    "build": "napi build --platform --release --esm --no-const-enum --manifest-path crates/wolf-napi/Cargo.toml --output-dir ts/native",
+    "build:dev": "napi build --platform --esm --no-const-enum --manifest-path crates/wolf-napi/Cargo.toml --output-dir ts/native",
+    "cli": "bun ts/cli.ts",
+    "test": "bun test"
+  },
+  "devDependencies": {
+    "@napi-rs/cli": "^3.8.6",
+    "@types/bun": "^1.4.0"
+  }
+}

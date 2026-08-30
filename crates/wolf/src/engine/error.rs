@@ -25,6 +25,23 @@ pub enum GameError {
     GameOver,
 }
 
+impl GameError {
+    /// A stable machine-readable tag so a non-Rust caller can branch on the failure.
+    pub fn code(&self) -> &'static str {
+        match self {
+            GameError::TooFewPlayers { .. } => "TooFewPlayers",
+            GameError::InvalidRoster(_) => "InvalidRoster",
+            GameError::UnknownPlayer(_) => "UnknownPlayer",
+            GameError::PlayerNotAlive(_) => "PlayerNotAlive",
+            GameError::NotAWerewolf(_) => "NotAWerewolf",
+            GameError::WrongPhase { .. } => "WrongPhase",
+            GameError::AlreadyActed(_) => "AlreadyActed",
+            GameError::ActionsIncomplete { .. } => "ActionsIncomplete",
+            GameError::GameOver => "GameOver",
+        }
+    }
+}
+
 impl fmt::Display for GameError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
