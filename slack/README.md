@@ -27,6 +27,18 @@ Startup uses `conversations.info` to check the public `#werewolf` channel, which
 
 When reusing an existing Slack app, also apply the manifest's event subscriptions (`app_mention`, `message.im`), Socket Mode, interactivity, and App Home messages settings.
 
+## Connected but no response to mentions
+
+In the Slack app settings, open **Event Subscriptions**, turn **Enable Events** on, and ensure **Subscribe to bot events** includes `app_mention` and `message.im`. Save changes and reinstall if Slack prompts you. Scopes such as `app_mentions:read` grant access; event subscriptions separately tell Slack which events to send. See [Slack's event setup instructions](https://docs.slack.dev/tools/bolt-js/creating-an-app/#subscribing-to-events).
+
+Restart `bun run slackbot`, then send `@Wolf status` in `#werewolf`, selecting the actual bot from Slack's mention picker. Startup prints the connected bot identity and channel ID. The terminal prints `Slack app_mention received.` for incoming mentions, an explanation for ignored mentions, and `Slack reply sent (channel).` after a successful status reply. These logs omit message contents and tokens. If no incoming mention appears, check the event subscription, that both tokens belong to the same app, and that only one bot process is running.
+
+## Bun Socket Mode compatibility
+
+Bun's built-in `undici` shim lacks the WebSocket `ping` export and heartbeat diagnostics used by Slack Socket Mode 3 ([upstream issue](https://github.com/oven-sh/bun/issues/37110)). This causes `Failed to send ping to Slack` errors and repeated reconnects.
+
+The repository declares `undici` directly and uses `patchedDependencies` to redirect Socket Mode 3.0.1's two runtime imports to `undici/index.js`, loading the installed package. `bun install` applies the patch automatically. After updating, run `bun install` and restart `bun run slackbot`. When upgrading Socket Mode, review the patch and run `bun test ts/slack-socket.test.ts` to check real heartbeat and message exchange against a local WebSocket server.
+
 ## Play
 
 - In `#werewolf`, mention the bot: `@Wolf join`. The first player is host; 5–12 players can join.

@@ -19,6 +19,10 @@
     "@types/bun": "^1.4.0"
   },
   "dependencies": {
-    "@slack/bolt": "^5.1.0"
+    "@slack/bolt": "^5.1.0",
+    "undici": "^7.29.1"
+  },
+  "patchedDependencies": {
+    "@slack/socket-mode@3.0.1": "patches/@slack%2Fsocket-mode@3.0.1.patch"
   }
 }

@@ -87,13 +87,29 @@ async function main(): Promise<void> {
     } else {
       await app.client.chat.postMessage(payload);
     }
+    console.log(`Slack reply sent (${message.destination}).`);
   }, error => console.error(`Slack delivery failed; queued messages will retry. ${slackErrorMessage(error)}`));
 
   app.event("app_mention", async ({ event, body }) => {
-    if (body.team_id !== auth.team_id || event.bot_id || !event.user || event.user === auth.user_id) return;
+    console.log("Slack app_mention received.");
+    if (body.team_id !== auth.team_id) {
+      console.log("Slack mention ignored: workspace does not match SLACK_BOT_TOKEN.");
+      return;
+    }
+    if (event.bot_id || !event.user || event.user === auth.user_id) {
+      console.log("Slack mention ignored: sender is a bot or has no user ID.");
+      return;
+    }
+    if (event.channel !== config.channel) {
+      console.log("Slack mention ignored: channel does not match SLACK_CHANNEL_ID.");
+      return;
+    }
     const mention = `<@${auth.user_id}>`;
     const text = event.text.trim();
-    if (!text.startsWith(mention)) return;
+    if (!text.startsWith(mention)) {
+      console.log("Slack mention ignored: the message must start with a mention of this bot.");
+      return;
+    }
     await delivery.receive({ id: body.event_id, kind: "mention", user: event.user, channel: event.channel, text: text.slice(mention.length) });
   });
 
@@ -120,7 +136,8 @@ async function main(): Promise<void> {
   };
   process.once("SIGINT", () => void stop());
   process.once("SIGTERM", () => void stop());
-  console.log("Wolf is connected to #werewolf. Mention the bot with help to begin.");
+  console.log(`Wolf is connected to #werewolf (${config.channel}) as ${auth.user ?? "Wolf"} (${auth.user_id}). Mention the bot with help to begin.`);
+  console.log("Waiting for app_mention events. If mentions produce no log, check Event Subscriptions → Enable Events and Subscribe to bot events → app_mention in the Slack app settings.");
 }
 
 if (import.meta.main) {

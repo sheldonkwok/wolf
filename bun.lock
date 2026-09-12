@@ -5,12 +5,16 @@
     "": {
       "dependencies": {
         "@slack/bolt": "^5.1.0",
+        "undici": "^7.29.1",
       },
       "devDependencies": {
         "@napi-rs/cli": "^3.8.6",
         "@types/bun": "^1.4.0",
       },
     },
+  },
+  "patchedDependencies": {
+    "@slack/socket-mode@3.0.1": "patches/@slack%2Fsocket-mode@3.0.1.patch",
   },
   "packages": {
     "@emnapi/core": ["@emnapi/core@1.9.2", "", { "dependencies": { "@emnapi/wasi-threads": "1.2.1", "tslib": "^2.4.0" } }, "sha512-UC+ZhH3XtczQYfOlu3lNEkdW/p4dsJ1r/bP7H8+rhao3TTTMO1ATq/4DdIi23XuGoFY+Cz0JmCbdVl0hz9jZcA=="],
