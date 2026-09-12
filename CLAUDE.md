@@ -30,6 +30,9 @@ It lives in `ts/lobby.ts` and drives the engine through the napi addon; it owns 
 The interactive test CLI (`ts/cli.ts`) is the front layer: arg parsing, prompting, rendering, and the bot opponents.
 It drives the engine through the napi addon, not a second copy of the game logic.
 
+### Slackbot - Bun TypeScript
+This is the slackbot which will be the primary interface in which the game is played. The bot will live in the #werewolf channel and can only manage the game in that channel. It will also DM players in Slack for there commands like voting.
+
 ## Layout
 Cargo workspace: `crates/wolf` is the dependency-free engine; `crates/wolf-napi` is the only crate that links napi.
 `ts/` holds the Bun front layer (`ts/lobby.ts`, `ts/cli.ts`); `ts/native/` is the generated addon (gitignored).

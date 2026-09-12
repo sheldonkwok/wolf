@@ -1,3 +1,6 @@
 target
 node_modules
 ts/native
+.env
+.env.*
+!.env.example
