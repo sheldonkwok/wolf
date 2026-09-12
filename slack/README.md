@@ -45,7 +45,8 @@ The repository declares `undici` directly and uses `patchedDependencies` to redi
 - `@Wolf leave` leaves a waiting lobby; if the host leaves, the next player becomes host.
 - The host uses `@Wolf start`. Everyone receives their role privately. Wolves also learn their pack.
 - At night, wolves choose a numbered player in their DM. The prompt maps each number to a Slack mention. Wolves can change a choice until all have chosen. If they disagree, all choose again using new buttons.
-- When night resolves, the channel receives the eliminated player's role and a discussion prompt. After 3–5 minutes, the host uses `@Wolf vote` to open private voting for every living player. There is no automatic timer.
+- When night resolves, the channel receives the eliminated player's role and a discussion prompt. Any living player can use `@Wolf ready`, `@Wolf ready to vote`, or `@Wolf vote`, or DM `ready`, `ready to vote`, or `vote`. Once more than half of the living players are ready, private elimination voting opens for every living player. The host has no special control over voting, and there is no automatic timer.
+- Readiness counts each living player once and resets each day. Status shows progress toward the required majority. Readiness opens voting; it does not cast an elimination vote or advance directly to night.
 - Each day vote is final. When all living players have voted, the engine resolves the result. A tie eliminates nobody; play continues until a team wins.
 - `@Wolf status` displays the public roster and phase. DM `status` to recover your role and any outstanding choice buttons. `@Wolf help` shows commands privately.
 - After a win, the channel gets the final roles and the roster returns to the waiting lobby. Players may join or leave, and the host can start again.
@@ -54,7 +55,7 @@ Game commands from other channels are ignored. Night choices, pack membership, a
 
 ## Operation and checks
 
-Run one bot process per workspace. Lobby state, game state, event deduplication, and the outgoing message queue live in memory; restarting loses them and players must rejoin. There is no automatic timeout or forced action for absent players, so the host should stay available even after elimination. Messages are sent in order; failed deliveries are retained and retried every five seconds. A persistent delivery failure pauses outgoing messages until Slack access is restored. An ambiguous network failure can produce a duplicate message, but retrying delivery does not replay a game command.
+Run one bot process per workspace. Lobby state, game state, event deduplication, and the outgoing message queue live in memory; restarting loses them and players must rejoin. There is no automatic timeout or forced action for absent players, so living players should stay available for readiness and voting. Messages are sent in order; failed deliveries are retained and retried every five seconds. A persistent delivery failure pauses outgoing messages until Slack access is restored. An ambiguous network failure can produce a duplicate message, but retrying delivery does not replay a game command.
 
 Tests use a fake Slack transport and the real addon, without workspace credentials or posting messages:
 

@@ -19,12 +19,11 @@ export type SlackInput = {
   channel: string;
 } & ({ kind: "mention" | "dm"; text: string } | { kind: "choice"; value: string });
 
-const HELP = "In the game channel: `@Wolf join`, `leave`, `start`, `status`, `vote`, or `help`. The first player is host; only the host starts games and opens voting after discussion. Use the buttons in my DMs for secret choices. DM `status` to get your role and current prompt again.";
+const HELP = "In the game channel: `@Wolf join`, `leave`, `start`, `status`, `vote`, `ready`, or `help`. The first player is host; only the host starts games. Tell me `ready to vote` in the game channel or a DM when you are ready. More than half of the living players must be ready to open elimination voting. Use the buttons in my DMs for secret choices. DM `status` to get your role and current prompt again.";
 
 export class SlackGame {
   private readonly seen = new Set<string>();
   private prompt = "";
-  private voting = false;
   private messages: SlackMessage[] = [];
 
   constructor(readonly channel: string, readonly lobby = new Lobby()) {}
@@ -38,7 +37,11 @@ export class SlackGame {
 
     try {
       if (input.kind === "choice") this.choose(input.user, input.value);
-      else if (input.kind === "dm") this.privateStatus(input.user);
+      else if (input.kind === "dm") {
+        const command = input.text.trim().toLowerCase();
+        if (["vote", "ready", "ready to vote"].includes(command)) this.readyToVote(input.user);
+        else this.privateStatus(input.user);
+      }
       else this.command(input.user, input.text.trim().toLowerCase());
     } catch (error) {
       if (!(error instanceof LobbyError || error instanceof GameError || error instanceof CommandError)) throw error;
@@ -65,22 +68,16 @@ export class SlackGame {
         if (!this.lobby.isHost(user)) throw new CommandError("Only the host can start the game.");
         if (this.lobby.game?.state().isOver) this.lobby.endGame();
         this.lobby.start(user);
-        this.voting = false;
         this.prompt = crypto.randomUUID();
         this.publish(`The game has started with ${this.lobby.size} players. Roles are in your DMs.`);
         for (const member of this.lobby.members) this.sendRole(member.user);
         this.announcePhase();
         break;
-      case "vote": {
-        if (!this.lobby.isHost(user)) throw new CommandError("Only the host can open voting.");
-        if (this.lobby.game?.state().phase !== "Day") throw new CommandError("Voting opens during the day.");
-        if (this.voting) throw new CommandError("Voting is already open.");
-        this.voting = true;
-        this.prompt = crypto.randomUUID();
-        this.publish("Voting is open. Living players: choose a player using the buttons in my DM. Votes are final.");
-        this.promptActors();
+      case "vote":
+      case "ready":
+      case "ready to vote":
+        this.readyToVote(user);
         break;
-      }
       case "status":
         this.publish(this.status());
         break;
@@ -91,6 +88,22 @@ export class SlackGame {
       default:
         throw new CommandError(HELP);
     }
+  }
+
+  private readyToVote(user: string): void {
+    const game = this.lobby.game;
+    const seat = this.lobby.seatOf(user);
+    if (!game || seat === null) throw new CommandError("You are not in an active game.");
+    attempt(() => game.readyToVote(seat));
+    const state = game.state();
+    this.dm(user, "You are ready to vote.");
+    if (!state.votingOpen) {
+      this.publish(`${state.readyPlayers.length}/${state.readinessRequired} players ready to open elimination voting. Use \`@Wolf ready\` or DM \`ready\` when you are ready.`);
+      return;
+    }
+    this.prompt = crypto.randomUUID();
+    this.publish("Voting is open. Living players: choose a player using the buttons in my DM. Votes are final.");
+    this.promptActors();
   }
 
   private choose(user: string, value: string): void {
@@ -105,7 +118,7 @@ export class SlackGame {
     if (!Number.isSafeInteger(target) || !this.lobby.memberAt(target)) throw new CommandError("Unknown target.");
     const state = game.state();
     if (state.phase === "Night") attempt(() => game.nightAction(seat, target));
-    else if (state.phase === "Day" && this.voting) attempt(() => game.vote(seat, target));
+    else if (state.phase === "Day" && state.votingOpen) attempt(() => game.vote(seat, target));
     else throw new CommandError("There is no choice to make right now.");
     this.dm(user, `Your ${state.phase === "Night" ? "night choice" : "vote"} for ${this.mention(target)} is recorded.`);
     if (game.state().pendingActors.length > 0) return;
@@ -124,7 +137,6 @@ export class SlackGame {
     } else {
       const result = attempt(() => game.resolveDay());
       this.prompt = crypto.randomUUID();
-      this.voting = false;
       if (result.kind === "Eliminated") this.elimination(result.eliminated!, "by the village");
       else this.publish("The vote was tied. Nobody was eliminated.");
     }
@@ -142,7 +154,7 @@ export class SlackGame {
       this.publish(`Night ${state.round}. The village sleeps. Werewolves, check your DMs.`);
       this.promptActors();
     } else {
-      this.publish(`Day ${state.round}. Discuss in <#${this.channel}> for 3–5 minutes. <@${this.lobby.host!.user}> can use \`@Wolf vote\` when everyone is ready.\n${this.livingRoster()}`);
+      this.publish(`Day ${state.round}. Discuss in <#${this.channel}>. Use \`@Wolf ready\` or DM \`ready to vote\` when you are ready. Elimination voting opens when more than half of the living players are ready (${state.readinessRequired} needed).\n${this.livingRoster()}`);
     }
   }
 
@@ -153,7 +165,7 @@ export class SlackGame {
   private sendPrompt(user: string): void {
     const state = this.lobby.game!.state();
     const seat = this.lobby.seatOf(user)!;
-    if (!state.pendingActors.includes(seat) || (state.phase === "Day" && !this.voting)) return;
+    if (!state.pendingActors.includes(seat) || (state.phase === "Day" && !state.votingOpen)) return;
     this.messages.push({
       destination: "dm",
       user,
@@ -188,7 +200,7 @@ export class SlackGame {
   private status(): string {
     const state = this.lobby.game?.state();
     if (!state) return this.roster();
-    return `${state.phase} ${state.round}${state.phase === "Day" ? this.voting ? " — voting open" : " — discussion" : ""}.\n${this.livingRoster()}`;
+    return `${state.phase} ${state.round}${state.phase === "Day" ? state.votingOpen ? " — voting open" : ` — discussion (${state.readyPlayers.length}/${state.readinessRequired} ready to open voting)` : ""}.\n${this.livingRoster()}`;
   }
 
   private roster(): string {

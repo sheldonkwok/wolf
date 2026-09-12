@@ -15,7 +15,7 @@ pub use player::{Player, PlayerId, Role};
 pub enum Phase {
     /// Werewolves choose a victim; resolved with [`Engine::resolve_night`].
     Night,
-    /// Everyone votes; resolved with [`Engine::resolve_day`].
+    /// Players discuss until a majority is ready, then vote; resolved with [`Engine::resolve_day`].
     Day,
     /// A team has won. No further commands are accepted.
     Ended,
@@ -57,6 +57,8 @@ pub struct Engine {
     night_picks: BTreeMap<PlayerId, PlayerId>,
     /// Living voter -> the player they voted for this day.
     day_votes: BTreeMap<PlayerId, PlayerId>,
+    /// Living players who are ready to open elimination voting this day.
+    ready_players: BTreeSet<PlayerId>,
 }
 
 impl Engine {
@@ -120,6 +122,7 @@ impl Engine {
             winner: None,
             night_picks: BTreeMap::new(),
             day_votes: BTreeMap::new(),
+            ready_players: BTreeSet::new(),
         }
     }
 
@@ -175,9 +178,23 @@ impl Engine {
         Ok(NightOutcome::Killed(target))
     }
 
-    /// Record `voter`'s day vote for `target`; one final vote per living player.
+    /// Mark a living player ready; a strict majority opens elimination voting.
+    pub fn ready_to_vote(&mut self, player: PlayerId) -> Result<(), GameError> {
+        self.ensure_phase(Phase::Day)?;
+        self.require_alive(player)?;
+        if self.voting_open() {
+            return Err(GameError::VotingAlreadyOpen);
+        }
+        if !self.ready_players.insert(player) {
+            return Err(GameError::AlreadyActed(player));
+        }
+        Ok(())
+    }
+
+    /// Record `voter`'s day vote for `target`; one final vote per living player after voting opens.
     pub fn vote(&mut self, voter: PlayerId, target: PlayerId) -> Result<(), GameError> {
         self.ensure_phase(Phase::Day)?;
+        self.ensure_voting_open()?;
 
         self.require_alive(voter)?;
         self.require_alive(target)?;
@@ -192,6 +209,7 @@ impl Engine {
     /// Resolve the day: eliminate the vote leader (a tie for the lead eliminates nobody), check for a win, advance to the next [`Phase::Night`] or [`Phase::Ended`].
     pub fn resolve_day(&mut self) -> Result<DayOutcome, GameError> {
         self.ensure_phase(Phase::Day)?;
+        self.ensure_voting_open()?;
 
         let living = self.living_ids_where(|_| true);
         let waiting_on: Vec<PlayerId> = living
@@ -215,6 +233,7 @@ impl Engine {
             .collect();
 
         self.day_votes.clear();
+        self.ready_players.clear();
 
         if leaders.len() != 1 {
             self.phase = Phase::Night;
@@ -295,7 +314,7 @@ impl Engine {
         (villagers, wolves)
     }
 
-    /// Who the engine still waits on and a chat bot nudges: unacted wolves (Night), non-voters (Day), or nobody (Ended).
+    /// Pending wolves at night, non-ready players during discussion, non-voters during voting, or nobody after ending.
     pub fn pending_actors(&self) -> Vec<PlayerId> {
         match self.phase {
             Phase::Night => self
@@ -306,10 +325,31 @@ impl Engine {
             Phase::Day => self
                 .living_ids_where(|_| true)
                 .into_iter()
-                .filter(|id| !self.day_votes.contains_key(id))
+                .filter(|id| {
+                    if self.voting_open() {
+                        !self.day_votes.contains_key(id)
+                    } else {
+                        !self.ready_players.contains(id)
+                    }
+                })
                 .collect(),
             Phase::Ended => Vec::new(),
         }
+    }
+
+    /// Living players who have signaled readiness this day, in id order.
+    pub fn ready_players(&self) -> Vec<PlayerId> {
+        self.ready_players.iter().copied().collect()
+    }
+
+    /// The number of ready players needed to open voting: strictly more than half the living players.
+    pub fn readiness_required(&self) -> usize {
+        self.alive().count() / 2 + 1
+    }
+
+    /// Whether elimination voting is open this day.
+    pub fn voting_open(&self) -> bool {
+        self.phase == Phase::Day && self.ready_players.len() >= self.readiness_required()
     }
 
     /// Votes cast so far this day as `voter -> target`; empty outside the day phase.
@@ -331,6 +371,14 @@ impl Engine {
     }
 
     // ----- internals --------------------------------------------------------
+
+    fn ensure_voting_open(&self) -> Result<(), GameError> {
+        if self.voting_open() {
+            Ok(())
+        } else {
+            Err(GameError::VotingNotOpen)
+        }
+    }
 
     fn ensure_phase(&self, expected: Phase) -> Result<(), GameError> {
         if self.phase == Phase::Ended {

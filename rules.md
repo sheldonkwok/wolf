@@ -51,7 +51,7 @@ The Moderator speaks aloud while everyone keeps their eyes tightly shut:
 2. **The Morning Report:** The Moderator announces what happened during the night:
    * *If saved:* "The Werewolves attacked Alex, but the Doctor saved them! No one was eliminated."
    * *If not saved:* "Sadly, Jamie was eliminated by the Werewolves!" *(Jamie silently shows their card and becomes a quiet spectator).*
-3. **Town Discussion (3–5 mins):** Players discuss who seems suspicious, who might be lying, or what clues were spotted.
+3. **Town Discussion:** Players discuss who seems suspicious, who might be lying, or what clues were spotted. Each living player tells the bot when they are ready to vote. Elimination voting opens once **more than half of the living players** are ready (for example, 4 of 7 or 4 of 6). Each player counts once, and readiness resets each day.
 4. **The Vote:**
    * Players count down: *"3, 2, 1... Point!"*
    * Everyone points to the person they suspect most.

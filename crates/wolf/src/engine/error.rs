@@ -17,8 +17,12 @@ pub enum GameError {
     NotAWerewolf(PlayerId),
     /// The command is not legal in the current phase.
     WrongPhase { expected: Phase, actual: Phase },
-    /// This player already cast their day vote, which is final.
+    /// This player already signaled readiness or cast their final day vote.
     AlreadyActed(PlayerId),
+    /// Elimination voting requires a strict majority of living players to be ready.
+    VotingNotOpen,
+    /// The readiness threshold has already been reached this day.
+    VotingAlreadyOpen,
     /// Resolution was attempted before every required actor had acted.
     ActionsIncomplete { waiting_on: Vec<PlayerId> },
     /// The game is over; no further commands are accepted.
@@ -36,6 +40,8 @@ impl GameError {
             GameError::NotAWerewolf(_) => "NotAWerewolf",
             GameError::WrongPhase { .. } => "WrongPhase",
             GameError::AlreadyActed(_) => "AlreadyActed",
+            GameError::VotingNotOpen => "VotingNotOpen",
+            GameError::VotingAlreadyOpen => "VotingAlreadyOpen",
             GameError::ActionsIncomplete { .. } => "ActionsIncomplete",
             GameError::GameOver => "GameOver",
         }
@@ -59,6 +65,11 @@ impl fmt::Display for GameError {
                 )
             }
             GameError::AlreadyActed(id) => write!(f, "player {id} has already acted this phase"),
+            GameError::VotingNotOpen => write!(
+                f,
+                "voting opens when more than half of the living players are ready"
+            ),
+            GameError::VotingAlreadyOpen => write!(f, "voting is already open"),
             GameError::ActionsIncomplete { waiting_on } => {
                 write!(f, "still waiting on {waiting_on:?}")
             }

@@ -26,6 +26,8 @@ export type GameErrorCode =
   | "NotAWerewolf"
   | "WrongPhase"
   | "AlreadyActed"
+  | "VotingNotOpen"
+  | "VotingAlreadyOpen"
   | "ActionsIncomplete"
   | "GameOver"
   | "Unknown";

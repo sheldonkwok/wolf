@@ -17,7 +17,10 @@
 //! game.night_action(game.player(6), game.player(1)).unwrap();
 //! game.resolve_night().unwrap();
 //!
-//! // Day 1: every living player votes; the town lynches wolf P0.
+//! // Day 1: a majority is ready, then every living player votes to lynch wolf P0.
+//! for player in [0, 2, 3, 4] {
+//!     game.ready_to_vote(game.player(player)).unwrap();
+//! }
 //! for voter in [0, 2, 3, 4, 5, 6] {
 //!     game.vote(game.player(voter), game.player(0)).unwrap();
 //! }

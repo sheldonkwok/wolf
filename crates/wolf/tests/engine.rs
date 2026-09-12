@@ -76,6 +76,11 @@ fn assert_winner_matches_survivors(g: &Engine) {
 fn play_out(g: &mut Engine, rng: &mut Rng, unanimous_town: bool) {
     // A unanimous pack kills one player every night, so `players` phases is a hard ceiling.
     for _ in 0..(g.players().len() * 2 + 4) {
+        if g.phase() == Phase::Day {
+            for player in living_ids(g).into_iter().take(g.readiness_required()) {
+                g.ready_to_vote(player).expect("ready");
+            }
+        }
         match g.phase() {
             Phase::Night => {
                 let victim = rng.pick(&living_ids(g));

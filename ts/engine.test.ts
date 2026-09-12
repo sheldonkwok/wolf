@@ -40,6 +40,7 @@ test("a full game plays through to a villager win", () => {
   expect(night).toEqual({ kind: "Killed", killed: 1 });
   expect(game.state().phase).toBe("Day");
 
+  for (const player of [0, 2, 3]) game.readyToVote(player);
   for (const voter of [0, 2, 3, 4]) game.vote(voter, voter === 0 ? 2 : 0);
   const day = normalizeDay(game.resolveDay());
   expect(day).toEqual({ kind: "Eliminated", eliminated: 0 });
@@ -57,6 +58,37 @@ test("a split pack resolves to NoConsensus and stays in Night", () => {
   expect(night.kind).toBe("NoConsensus");
   if (night.kind === "NoConsensus") expect(night.targets.sort()).toEqual([2, 3]);
   expect(game.state().phase).toBe("Night");
+});
+
+test("readiness crosses the binding, gates votes, and clears after resolution", () => {
+  const game = Game.withRoles(["Werewolf", "Villager", "Villager", "Villager", "Villager"]);
+  expect(grab(() => game.readyToVote(0)).code).toBe("WrongPhase");
+  game.nightAction(0, 1);
+  game.resolveNight();
+  expect(game.state().readinessRequired).toBe(3);
+  expect(grab(() => game.readyToVote(1)).code).toBe("PlayerNotAlive");
+  expect(grab(() => game.readyToVote(99)).code).toBe("UnknownPlayer");
+  game.readyToVote(0);
+  expect(grab(() => game.readyToVote(0)).code).toBe("AlreadyActed");
+  game.readyToVote(2);
+  expect(game.state().readyPlayers).toEqual([0, 2]);
+  expect(game.state().votingOpen).toBe(false);
+  expect(game.state().pendingActors).toEqual([3, 4]);
+  expect(grab(() => game.vote(3, 0)).code).toBe("VotingNotOpen");
+  expect(grab(() => game.resolveDay()).code).toBe("VotingNotOpen");
+  game.readyToVote(3);
+  expect(game.state().votingOpen).toBe(true);
+  expect(game.state().phase).toBe("Day");
+  expect(game.state().pendingActors).toEqual([0, 2, 3, 4]);
+  expect(grab(() => game.readyToVote(4)).code).toBe("VotingAlreadyOpen");
+  for (const player of [0, 2, 3, 4]) game.vote(player, player);
+  game.resolveDay();
+  expect(game.state().readyPlayers).toEqual([]);
+  expect(game.state().votingOpen).toBe(false);
+  game.nightAction(0, 2);
+  game.resolveNight();
+  expect(game.state().readinessRequired).toBe(2);
+  expect(game.state().votingOpen).toBe(false);
 });
 
 test("unknown player throws UnknownPlayer", () => {
@@ -81,6 +113,7 @@ test("voting twice throws AlreadyActed", () => {
   const game = Game.withRoles(["Werewolf", "Villager", "Villager", "Villager", "Villager"]);
   game.nightAction(0, 1);
   game.resolveNight();
+  for (const player of [0, 2, 3]) game.readyToVote(player);
   game.vote(2, 0);
   expect(grab(() => game.vote(2, 3)).code).toBe("AlreadyActed");
 });

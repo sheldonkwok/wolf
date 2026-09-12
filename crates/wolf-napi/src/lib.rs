@@ -115,6 +115,9 @@ pub struct GameState {
     pub is_over: bool,
     pub players: Vec<PlayerView>,
     pub pending_actors: Vec<u32>,
+    pub ready_players: Vec<u32>,
+    pub readiness_required: u32,
+    pub voting_open: bool,
     pub votes: Vec<VoteView>,
     pub night_picks: Vec<VoteView>,
     pub alive_villagers: u32,
@@ -219,6 +222,14 @@ impl Game {
         self.inner.resolve_night().map(night_result).map_err(to_js)
     }
 
+    /// Mark a living player ready to open elimination voting.
+    #[napi]
+    pub fn ready_to_vote(&mut self, player: u32) -> napi::Result<()> {
+        self.inner
+            .ready_to_vote(PlayerId(player as usize))
+            .map_err(to_js)
+    }
+
     /// Record `voter`'s final day vote for `target`.
     #[napi]
     pub fn vote(&mut self, voter: u32, target: u32) -> napi::Result<()> {
@@ -269,6 +280,9 @@ impl Game {
             is_over: e.is_over(),
             players,
             pending_actors: e.pending_actors().into_iter().map(seat).collect(),
+            ready_players: e.ready_players().into_iter().map(seat).collect(),
+            readiness_required: e.readiness_required() as u32,
+            voting_open: e.voting_open(),
             votes: votes_to_views(e.current_votes()),
             night_picks: votes_to_views(e.current_night_picks()),
             alive_villagers: villagers as u32,

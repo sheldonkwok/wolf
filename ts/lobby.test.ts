@@ -40,6 +40,7 @@ function playOut(game: Game): void {
       expect(normalizeNight(game.resolveNight()).kind).toBe("Killed");
     } else {
       const living = s.players.filter((p) => p.alive).map((p) => p.id);
+      for (const player of living.slice(0, s.readinessRequired)) game.readyToVote(player);
       for (const voter of living) game.vote(voter, voter);
       expect(normalizeDay(game.resolveDay()).kind).toBe("NoElimination");
     }

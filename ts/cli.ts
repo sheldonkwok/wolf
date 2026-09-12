@@ -250,6 +250,17 @@ class Table {
     const alive = livingIds(this.state()).map(nameOf);
     console.log(`Alive: ${alive.join(", ")}`);
 
+    if (this.iAmAlive()) {
+      console.log("Press Enter when you are ready to open elimination voting.");
+      if (await this.reader.next() === null) return false;
+      this.game.readyToVote(this.me);
+    }
+    for (const id of livingIds(this.state()).filter(id => id !== this.me)) {
+      if (this.state().votingOpen) break;
+      this.game.readyToVote(id);
+    }
+    console.log("A majority is ready. Elimination voting is open.");
+
     let myVote: number | null = null;
     if (this.iAmAlive()) {
       const choices = livingIds(this.state()).filter((id) => id !== this.me);
