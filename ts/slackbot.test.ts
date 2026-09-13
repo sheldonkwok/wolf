@@ -2,16 +2,16 @@ import { expect, test } from "bun:test";
 import { Lobby } from "./lobby.js";
 import { SlackDelivery } from "./slack/delivery.js";
 import { SlackGame, type SlackInput, type SlackMessage } from "./slack/game.js";
-import { messageBlocks, slackConfig, slackErrorMessage } from "./slackbot.js";
+import { messageBlocks, slackArgs, slackChannel, slackConfig, slackErrorMessage } from "./slackbot.js";
 
 class SeededLobby extends Lobby {
   constructor(private seed: bigint) { super(); }
   override start(host: string) { return this.startWithSeed(host, this.seed); }
 }
 
-function table(count = 8, seed = 42n) {
+function table(count = 8, seed = 42n, dev = false) {
   const lobby = new SeededLobby(seed);
-  const bot = new SlackGame("CGAME", lobby);
+  const bot = new SlackGame("CGAME", lobby, { dev, seed });
   let sequence = 0;
   const messages: SlackMessage[] = [];
   const receive = (input: Omit<SlackInput, "id"> & { text?: string; value?: string }) => {
@@ -279,6 +279,92 @@ test("configuration requires tokens and a public channel ID without exposing sec
   const env = { SLACK_BOT_TOKEN: "xoxb-secret", SLACK_APP_TOKEN: "xapp-secret", SLACK_CHANNEL_ID: "CGAME" };
   expect(slackConfig(env).channel).toBe("CGAME");
   expect(() => slackConfig({ ...env, SLACK_CHANNEL_ID: "#werewolf" })).toThrow("SLACK_CHANNEL_ID");
+});
+
+test("Slack CLI dev mode is opt-in and rejects unknown flags", () => {
+  expect(slackArgs([])).toEqual({ dev: false, help: false });
+  expect(slackArgs(["--", "--dev"])).toEqual({ dev: true, help: false });
+  expect(slackArgs(["--help"]).help).toBe(true);
+  expect(() => slackArgs(["--development"])).toThrow("Unknown argument");
+});
+
+test("startup accepts only werewolf channels with active bot membership", () => {
+  for (const name of ["werewolf", "werewolf-test"]) {
+    expect(slackChannel({ name, is_member: true, is_archived: false })).toBe(name);
+    expect(() => slackChannel({ name, is_member: false })).toThrow("invite the bot");
+    expect(() => slackChannel({ name, is_member: true, is_archived: true })).toThrow("not archived");
+  }
+  for (const name of ["general", "werewolf-testing", "werewolf-test-extra", ""]) {
+    expect(() => slackChannel({ name, is_member: true })).toThrow("#werewolf or #werewolf-test");
+  }
+  expect(() => slackChannel()).toThrow("SLACK_CHANNEL_ID");
+});
+
+test("dev mode requires a human host and advertises solo play", () => {
+  const empty = table(0, 42n, true);
+  expect(empty.command("start")[0]?.text).toContain("Only the host");
+  expect(empty.lobby.size).toBe(0);
+  const t = table(1, 42n, true);
+  expect(t.command("help")[0]?.text).toContain("Dev mode");
+  expect(t.command("status")[0]?.text).toContain("minimum 1 human");
+  expect(t.command("start", "OUTSIDER")[0]?.text).toContain("Only the host");
+  expect(t.lobby.size).toBe(1);
+});
+
+test("dev games fill with bots, wait for humans, finish after elimination, and clean up for replay", () => {
+  const roles = new Set<string>();
+  let soloReadiness = 0;
+  let eliminatedHumans = 0;
+  for (const humans of [1, 2, 4, 5]) {
+    for (let seed = 0n; seed < 30n; seed++) {
+      const t = table(humans, seed, true);
+      const start = t.command("start");
+      expect(start[0]?.text).toContain("started with 5 players");
+      expect(start.filter(m => m.text.includes("You are Player")).length).toBe(humans);
+      roles.add(start.find(m => m.user === "U0" && m.text.includes("You are Player"))!.text.split("a ")[1]!.split(".")[0]!);
+      let turns = 0;
+      while (t.lobby.game) {
+        if (++turns > 20) throw new Error("Dev game did not finish");
+        const game = t.lobby.game;
+        const state = game.state();
+        expect(state.players.length).toBe(5);
+        const humanActors = state.pendingActors.filter(seat => seat < humans);
+        expect(humanActors.length).toBeGreaterThan(0);
+        if (state.phase === "Night") {
+          const target = state.players.find(p => p.alive && p.role === "Villager")!.id;
+          for (const seat of humanActors) t.choose(seat, target);
+        } else {
+          expect(state.votingOpen).toBe(false);
+          expect(state.readyPlayers).toEqual([]);
+          expect(t.dm(`U${humanActors[0]}`).some(m => m.choices)).toBe(false);
+          expect(t.command("ready", "OUTSIDER")[0]?.text).toContain("not in an active game");
+          const before = game.state();
+          const ready = t.dm(`U${humanActors[0]}`, "ready");
+          if (humans === 1) {
+            soloReadiness++;
+            expect(ready.some(m => m.choices)).toBe(true);
+            expect(game.state().votingOpen).toBe(true);
+            expect(game.state().round).toBe(before.round);
+            expect(game.state().votes).toEqual([]);
+            expect(t.command("ready")[0]?.text).toContain("already open");
+          }
+          openVoting(t);
+          const target = state.players.find(p => p.alive && p.role === "Werewolf")!.id;
+          for (const seat of humanActors) t.choose(seat, target);
+        }
+      }
+      expect(t.messages.some(m => m.text.includes("win!"))).toBe(true);
+      eliminatedHumans += t.messages.filter(m => m.destination === "dm" && m.text.startsWith("You were eliminated.")).length;
+      expect(t.messages.every(m => m.destination === "channel" || m.user === "OUTSIDER" || /^U\d+$/.test(m.user!))).toBe(true);
+      expect(t.messages.every(m => !m.text.includes("<@bot-"))).toBe(true);
+      expect(t.lobby.members.map(m => m.user)).toEqual(Array.from({ length: humans }, (_, i) => `U${i}`));
+      expect(t.lobby.host?.user).toBe("U0");
+      expect(t.command("start")[0]?.text).toContain("started with 5 players");
+    }
+  }
+  expect(roles).toEqual(new Set(["Werewolf", "Villager"]));
+  expect(soloReadiness).toBeGreaterThan(0);
+  expect(eliminatedHumans).toBeGreaterThan(0);
 });
 
 test("scope errors explain bot reinstall or app token repair without dumping API data", () => {

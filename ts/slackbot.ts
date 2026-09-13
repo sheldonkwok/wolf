@@ -3,11 +3,24 @@ import { SlackDelivery } from "./slack/delivery.js";
 import { SlackGame, type SlackMessage } from "./slack/game.js";
 import manifest from "../slack/manifest.json";
 
+export function slackArgs(argv: string[]) {
+  const args = { dev: false, help: false };
+  for (const arg of argv) {
+    if (arg === "--dev") args.dev = true;
+    else if (arg === "--help" || arg === "-h") args.help = true;
+    else if (arg !== "--") throw new Error(`Unknown argument: ${arg}. Use --help for usage.`);
+  }
+  return args;
+}
+
 export function slackErrorMessage(error: unknown): string {
   let current = error;
   for (let depth = 0; depth < 5 && current && typeof current === "object"; depth++) {
     if ("data" in current && current.data && typeof current.data === "object") {
       const data = current.data as Record<string, unknown>;
+      if (data.error === "messages_tab_disabled") {
+        return "Slack messages_tab_disabled: the app's Messages tab is disabled, blocking private game messages.\nIn the Slack app settings → App Home → Show Tabs, enable Messages Tab and allow users to send messages from that tab. Save changes. The repository manifest already enables these settings; apply them to the app used by SLACK_BOT_TOKEN. Keep this bot process running: queued messages retry every five seconds after the setting is fixed.\nSee slack/README.md.";
+      }
       if (data.error === "missing_scope") {
         const scopes = (value: unknown) => typeof value === "string"
           ? value.split(",").filter(scope => /^[a-z_]+(?::[a-z_:]+)?$/.test(scope)).join(", ")
@@ -16,7 +29,7 @@ export function slackErrorMessage(error: unknown): string {
         const provided = scopes(data.provided);
         const fix = needed.includes("connections:write")
           ? "Add connections:write to the app-level token under Basic Information → App-Level Tokens, and update SLACK_APP_TOKEN if the token changes."
-          : `Under OAuth & Permissions → Bot Token Scopes, grant ${manifest.oauth_config.scopes.bot.join(", ")}. Reinstall the app to the workspace, then ensure SLACK_BOT_TOKEN matches the installed Bot User OAuth Token. Use a public #werewolf channel.`;
+          : `Under OAuth & Permissions → Bot Token Scopes, grant ${manifest.oauth_config.scopes.bot.join(", ")}. Reinstall the app to the workspace, then ensure SLACK_BOT_TOKEN matches the installed Bot User OAuth Token. Use a public #werewolf or #werewolf-test channel.`;
         return `Slack missing_scope.${needed ? ` API scope requirements: ${needed} (depending on conversation type).` : ""}${provided ? ` Token currently grants: ${provided}.` : ""}\n${fix}\nSee slack/README.md.`;
       }
     }
@@ -38,6 +51,13 @@ export function slackConfig(env: Record<string, string | undefined>) {
   };
 }
 
+export function slackChannel(channel?: { name?: string; is_member?: boolean; is_archived?: boolean }): string {
+  if (!channel?.name || !["werewolf", "werewolf-test"].includes(channel.name) || !channel.is_member || channel.is_archived) {
+    throw new Error("SLACK_CHANNEL_ID must identify #werewolf or #werewolf-test; invite the bot there and ensure the channel is not archived.");
+  }
+  return channel.name;
+}
+
 export function messageBlocks(message: SlackMessage) {
   if (!message.choices) return undefined;
   return [
@@ -55,21 +75,24 @@ export function messageBlocks(message: SlackMessage) {
 }
 
 async function main(): Promise<void> {
+  const args = slackArgs(process.argv.slice(2));
+  if (args.help) {
+    console.log("Usage: bun run slackbot [--dev]\n\n--dev  Fill games to five players with bots; solo readiness opens voting.\n--help Show this help.");
+    return;
+  }
   const config = slackConfig(process.env);
   const app = new App({ token: config.token, appToken: config.appToken, socketMode: true });
   const [auth, conversation] = await Promise.all([
     app.client.auth.test(),
     app.client.conversations.info({ channel: config.channel }).catch(error => {
-      throw new Error(`Checking #werewolf (conversations.info): ${slackErrorMessage(error)}`);
+      throw new Error(`Checking configured game channel (conversations.info): ${slackErrorMessage(error)}`);
     }),
   ]);
   if (!auth.user_id || !auth.team_id) throw new Error("Slack did not identify the bot or workspace.");
-  if (conversation.channel?.name !== "werewolf" || !conversation.channel.is_member || conversation.channel.is_archived) {
-    throw new Error("SLACK_CHANNEL_ID must identify #werewolf; invite the bot there and ensure the channel is not archived.");
-  }
+  const channelName = slackChannel(conversation.channel);
 
   const dms = new Map<string, string>();
-  const delivery = new SlackDelivery(new SlackGame(config.channel), async message => {
+  const delivery = new SlackDelivery(new SlackGame(config.channel, undefined, args), async message => {
     let channel = config.channel;
     if (message.destination === "dm") {
       const user = message.user!;
@@ -136,7 +159,8 @@ async function main(): Promise<void> {
   };
   process.once("SIGINT", () => void stop());
   process.once("SIGTERM", () => void stop());
-  console.log(`Wolf is connected to #werewolf (${config.channel}) as ${auth.user ?? "Wolf"} (${auth.user_id}). Mention the bot with help to begin.`);
+  console.log(`Wolf is connected to #${channelName} (${config.channel}) as ${auth.user ?? "Wolf"} (${auth.user_id}). Mention the bot with help to begin.`);
+  if (args.dev) console.log("Dev mode enabled: games fill to five players with bots. Join and start to play solo.");
   console.log("Waiting for app_mention events. If mentions produce no log, check Event Subscriptions → Enable Events and Subscribe to bot events → app_mention in the Slack app settings.");
 }
 

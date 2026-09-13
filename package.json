@@ -12,7 +12,8 @@
     "build:dev": "napi build --platform --esm --no-const-enum --manifest-path crates/wolf-napi/Cargo.toml --output-dir ts/native",
     "cli": "bun ts/cli.ts",
     "slackbot": "bun ts/slackbot.ts",
-    "test": "bun test"
+    "test": "bun test",
+    "typecheck": "tsc --noEmit"
   },
   "devDependencies": {
     "@napi-rs/cli": "^3.8.6",
