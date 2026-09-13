@@ -29,9 +29,24 @@
 
 ## How to Play
 
-The game alternates between **Night** (secret actions) and **Day** (discussion and voting) until one team wins.
+After roles are assigned privately, the game starts with **Day 1**, with everyone alive. Players discuss and vote before the first night. Play then alternates **Day 1 → Night 1 → Day 2 → Night 2**, until one team wins.
 
-### 1. Night Phase (Eyes Closed)
+### 1. Day Phase (Eyes Open)
+
+1. **Opening Day:** The Moderator announces that the game has begun. Everyone is alive and there is no overnight report on Day 1.
+2. **Later Mornings:** The Moderator announces what happened during the preceding night:
+   * *If saved:* "The Werewolves attacked Alex, but the Doctor saved them! No one was eliminated."
+   * *If not saved:* "Sadly, Jamie was eliminated by the Werewolves!" *(Jamie silently shows their card and becomes a quiet spectator).*
+3. **Town Discussion:** Players discuss who seems suspicious, who might be lying, or what clues were spotted. Each living player tells the bot when they are ready to vote. Elimination voting opens once **more than half of the living players** are ready (for example, 4 of 7 or 4 of 6). Each player counts once, and readiness resets each day, including Day 1.
+4. **The Vote:**
+   * Players count down: *"3, 2, 1... Point!"*
+   * Everyone points to the person they suspect most.
+   * The player with the most votes is eliminated and reveals their role card. If the lead is tied, nobody is eliminated.
+   * If neither team has won, night begins with the same round number.
+
+---
+
+### 2. Night Phase (Eyes Closed)
 
 The Moderator speaks aloud while everyone keeps their eyes tightly shut:
 
@@ -43,19 +58,7 @@ The Moderator speaks aloud while everyone keeps their eyes tightly shut:
 4. **"Seer, open your eyes and pick someone to inspect."**  
    *(Seer opens eyes, points to a player. The Moderator gives a 👍 [Innocent] or 👎 [Werewolf]. Seer closes eyes).*
 
----
-
-### 2. Day Phase (Eyes Open)
-
-1. **"Sun rises, everyone wake up!"**
-2. **The Morning Report:** The Moderator announces what happened during the night:
-   * *If saved:* "The Werewolves attacked Alex, but the Doctor saved them! No one was eliminated."
-   * *If not saved:* "Sadly, Jamie was eliminated by the Werewolves!" *(Jamie silently shows their card and becomes a quiet spectator).*
-3. **Town Discussion:** Players discuss who seems suspicious, who might be lying, or what clues were spotted. Each living player tells the bot when they are ready to vote. Elimination voting opens once **more than half of the living players** are ready (for example, 4 of 7 or 4 of 6). Each player counts once, and readiness resets each day.
-4. **The Vote:**
-   * Players count down: *"3, 2, 1... Point!"*
-   * Everyone points to the person they suspect most.
-   * The player with the most votes is eliminated and reveals their role card.
+After the night actions resolve, check for a winner. If the game continues, begin the next numbered day.
 
 ---
 

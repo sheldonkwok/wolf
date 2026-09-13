@@ -51,7 +51,7 @@ For solo testing, run `bun run slackbot -- --dev`, then use `@Wolf join` and `@W
 
 - In your configured `#werewolf` or `#werewolf-test` channel, mention the bot: `@Wolf join`. The first player is host; 5–12 players can join.
 - `@Wolf leave` leaves a waiting lobby; if the host leaves, the next player becomes host.
-- The host uses `@Wolf start`. Everyone receives their role privately. Wolves also learn their pack.
+- The host uses `@Wolf start`. Everyone receives their role privately. Wolves also learn their pack. Games begin with Day 1 discussion and everyone alive; a majority must be ready before the first elimination vote. Play proceeds Day 1 → Night 1 → Day 2.
 - At night, wolves choose a numbered player in their DM. The prompt maps each number to a Slack mention. Wolves can change a choice until all have chosen. If they disagree, all choose again using new buttons.
 - When night resolves, the channel receives the eliminated player's role and a discussion prompt. Any living player can use `@Wolf ready`, `@Wolf ready to vote`, or `@Wolf vote`, or DM `ready`, `ready to vote`, or `vote`. Once more than half of the living players are ready, private elimination voting opens for every living player. The host has no special control over voting, and there is no automatic timer.
 - Readiness counts each living player once and resets each day. Status shows progress toward the required majority. Readiness opens voting; it does not cast an elimination vote or advance directly to night.

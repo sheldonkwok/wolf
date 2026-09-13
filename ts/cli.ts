@@ -236,14 +236,14 @@ class Table {
   private async runDay(): Promise<boolean> {
     this.drawBanner(`Day ${this.state().round}`);
 
-    console.log("Sun rises, everyone wake up!");
+    console.log(this.state().round === 1 ? "The game begins. Discuss who you suspect before voting." : "Sun rises, everyone wake up!");
     if (this.nightVictim !== null) {
       const victim = this.nightVictim;
       this.nightVictim = null;
       console.log(
         `Sadly, ${nameOf(victim)} was eliminated by the Werewolves! (${roleTag(this.game.roleOf(victim))})`,
       );
-    } else {
+    } else if (this.state().round > 1) {
       console.log("Everyone is still here — no one was eliminated in the night.");
     }
 

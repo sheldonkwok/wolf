@@ -117,7 +117,7 @@ impl Engine {
             .collect();
         Engine {
             players,
-            phase: Phase::Night,
+            phase: Phase::Day,
             round: 1,
             winner: None,
             night_picks: BTreeMap::new(),
@@ -174,6 +174,7 @@ impl Engine {
         self.settle();
         if self.phase != Phase::Ended {
             self.phase = Phase::Day;
+            self.round += 1;
         }
         Ok(NightOutcome::Killed(target))
     }
@@ -237,7 +238,6 @@ impl Engine {
 
         if leaders.len() != 1 {
             self.phase = Phase::Night;
-            self.round += 1;
             return Ok(DayOutcome::NoElimination);
         }
 
@@ -246,7 +246,6 @@ impl Engine {
         self.settle();
         if self.phase != Phase::Ended {
             self.phase = Phase::Night;
-            self.round += 1;
         }
         Ok(DayOutcome::Eliminated(target))
     }
@@ -263,7 +262,7 @@ impl Engine {
         self.phase
     }
 
-    /// The current round number, starting at 1 and bumped when a day resolves into a night.
+    /// The current round number, starting at 1 and bumped when a night resolves into a day.
     pub fn round(&self) -> usize {
         self.round
     }

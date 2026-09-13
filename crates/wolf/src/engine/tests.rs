@@ -7,9 +7,11 @@ use Role::{Villager as V, Werewolf as W};
 // helpers
 // ---------------------------------------------------------------------------
 
-/// Build a game from an exact roster, panicking if the roster is invalid.
-fn game(roles: &[Role]) -> Engine {
-    Engine::with_roles(roles).expect("roster should be valid")
+/// Reach Night 1 through a tied opening vote, preserving the exact roster.
+fn night_game(roles: &[Role]) -> Engine {
+    let mut g = Engine::with_roles(roles).expect("roster should be valid");
+    assert_eq!(town_ties(&mut g), DayOutcome::NoElimination);
+    g
 }
 
 /// Shorthand for a player id; a free function so it works inside `&mut engine` calls.
@@ -64,7 +66,7 @@ fn readiness_requires_a_strict_living_majority_and_resets_each_day() {
     for count in [5, 6, 8] {
         let mut roles = vec![V; count];
         roles[0] = W;
-        let mut g = game(&roles);
+        let mut g = night_game(&roles);
         wolves_kill(&mut g, p(1));
         let living = living_ids(&g);
         let required = living.len() / 2 + 1;
@@ -83,7 +85,7 @@ fn readiness_requires_a_strict_living_majority_and_resets_each_day() {
             }
         }
         assert_eq!(g.phase(), Phase::Day);
-        assert_eq!(g.round(), 1);
+        assert_eq!(g.round(), 2);
         assert_eq!(living_ids(&g), living);
         assert_eq!(g.pending_actors(), living);
         assert!(g.current_votes().is_empty());
@@ -105,7 +107,7 @@ fn readiness_requires_a_strict_living_majority_and_resets_each_day() {
 
 #[test]
 fn invalid_readiness_commands_leave_state_unchanged() {
-    let mut g = game(&[W, V, V, V, V]);
+    let mut g = night_game(&[W, V, V, V, V]);
     let before = g.clone();
     assert_eq!(
         g.ready_to_vote(p(0)),
@@ -176,7 +178,7 @@ fn werewolf_count_scales_with_player_count() {
         );
         assert_eq!(g.players().len(), players);
         assert!(g.players().iter().all(|p| p.is_alive()));
-        assert_eq!(g.phase(), Phase::Night);
+        assert_eq!(g.phase(), Phase::Day);
         assert_eq!(g.round(), 1);
         assert_eq!(g.winner(), None);
         assert!(!g.is_over());
@@ -219,7 +221,7 @@ fn with_seed_is_reproducible_and_seed_sensitive() {
     for seed in 0..50 {
         let g = Engine::with_seed(9, seed).unwrap();
         assert_eq!(g.alive_count_by_role(), (7, 2));
-        assert_eq!(g.phase(), Phase::Night);
+        assert_eq!(g.phase(), Phase::Day);
     }
 }
 
@@ -246,7 +248,7 @@ fn with_roles_rejects_unstartable_rosters() {
 
 #[test]
 fn villager_cannot_take_the_night_action() {
-    let mut g = game(&[W, V, V, V, V]);
+    let mut g = night_game(&[W, V, V, V, V]);
     assert_eq!(
         g.night_action(p(1), p(2)).unwrap_err(),
         GameError::NotAWerewolf(p(1))
@@ -256,7 +258,7 @@ fn villager_cannot_take_the_night_action() {
 
 #[test]
 fn out_of_range_ids_are_rejected() {
-    let mut g = game(&[W, V, V, V, V]);
+    let mut g = night_game(&[W, V, V, V, V]);
     assert_eq!(
         g.night_action(p(9), p(1)).unwrap_err(),
         GameError::UnknownPlayer(p(9))
@@ -271,9 +273,9 @@ fn out_of_range_ids_are_rejected() {
 
 #[test]
 fn dead_players_cannot_act_or_be_targeted() {
-    let mut g = game(&[W, W, V, V, V, V, V, V]);
+    let mut g = night_game(&[W, W, V, V, V, V, V, V]);
     wolves_kill(&mut g, p(2)); // night 1 eliminates V2
-    town_lynches(&mut g, p(1)); // day 1 lynches W1
+    town_lynches(&mut g, p(1)); // day 2 lynches W1
     assert_eq!(g.phase(), Phase::Night);
 
     // A dead wolf cannot act...
@@ -290,7 +292,7 @@ fn dead_players_cannot_act_or_be_targeted() {
 
 #[test]
 fn a_day_vote_cannot_be_changed_once_cast() {
-    let mut g = game(&[W, W, V, V, V, V]);
+    let mut g = night_game(&[W, W, V, V, V, V]);
     wolves_kill(&mut g, p(2));
     open_voting(&mut g);
 
@@ -303,7 +305,7 @@ fn a_day_vote_cannot_be_changed_once_cast() {
 
 #[test]
 fn a_wolf_may_overwrite_their_night_pick() {
-    let mut g = game(&[W, W, V, V, V, V]);
+    let mut g = night_game(&[W, W, V, V, V, V]);
     g.night_action(p(0), p(2)).unwrap();
     g.night_action(p(1), p(3)).unwrap();
     // P0 changes their mind to match P1; the pack now agrees.
@@ -317,7 +319,7 @@ fn a_wolf_may_overwrite_their_night_pick() {
 
 #[test]
 fn commands_are_rejected_in_the_wrong_phase() {
-    let mut g = game(&[W, V, V, V, V]);
+    let mut g = night_game(&[W, V, V, V, V]);
     // Night: voting and resolving the day are both illegal.
     assert_eq!(
         g.vote(p(1), p(0)).unwrap_err(),
@@ -356,7 +358,7 @@ fn commands_are_rejected_in_the_wrong_phase() {
 
 #[test]
 fn resolve_night_waits_for_every_wolf() {
-    let mut g = game(&[W, W, V, V, V, V]);
+    let mut g = night_game(&[W, W, V, V, V, V]);
     g.night_action(p(0), p(2)).unwrap();
     assert_eq!(
         g.resolve_night().unwrap_err(),
@@ -370,7 +372,7 @@ fn resolve_night_waits_for_every_wolf() {
 
 #[test]
 fn a_split_pack_repicks_instead_of_deadlocking() {
-    let mut g = game(&[W, W, V, V, V, V]);
+    let mut g = night_game(&[W, W, V, V, V, V]);
     g.night_action(p(0), p(2)).unwrap();
     g.night_action(p(1), p(3)).unwrap();
     assert_eq!(
@@ -395,7 +397,7 @@ fn a_split_pack_repicks_instead_of_deadlocking() {
 
 #[test]
 fn resolve_night_still_waits_on_a_silent_wolf_before_judging_the_pack() {
-    let mut g = game(&[W, W, V, V, V, V]);
+    let mut g = night_game(&[W, W, V, V, V, V]);
     g.night_action(p(0), p(2)).unwrap();
     // P1 has not picked at all: that is incomplete, not a split.
     assert_eq!(
@@ -408,14 +410,14 @@ fn resolve_night_still_waits_on_a_silent_wolf_before_judging_the_pack() {
 
 #[test]
 fn a_lone_wolf_never_reports_no_consensus() {
-    let mut g = game(&[W, V, V, V, V]);
+    let mut g = night_game(&[W, V, V, V, V]);
     g.night_action(p(0), p(1)).unwrap();
     assert_eq!(g.resolve_night().unwrap(), NightOutcome::Killed(p(1)));
 }
 
 #[test]
 fn resolve_day_waits_for_every_living_voter() {
-    let mut g = game(&[W, V, V, V, V]);
+    let mut g = night_game(&[W, V, V, V, V]);
     wolves_kill(&mut g, p(1)); // living: P0, P2, P3, P4
     open_voting(&mut g);
     g.vote(p(0), p(3)).unwrap();
@@ -430,7 +432,7 @@ fn resolve_day_waits_for_every_living_voter() {
 
 #[test]
 fn no_commands_are_accepted_after_the_game_ends() {
-    let mut g = game(&[W, V, V, V, V]);
+    let mut g = night_game(&[W, V, V, V, V]);
     wolves_kill(&mut g, p(1)); // 3 villagers, 1 wolf
     town_lynches(&mut g, p(2)); // mislynch -> 2 villagers, 1 wolf
     wolves_kill(&mut g, p(3)); // 1 vs 1 -> werewolves win
@@ -450,32 +452,33 @@ fn no_commands_are_accepted_after_the_game_ends() {
 
 #[test]
 fn villagers_win_by_lynching_the_lone_wolf_on_day_one() {
-    let mut g = game(&[W, V, V, V, V]);
-    assert_eq!(wolves_kill(&mut g, p(1)), NightOutcome::Killed(p(1)));
+    let mut g = Engine::with_roles(&[W, V, V, V, V]).unwrap();
     assert_eq!(g.phase(), Phase::Day);
 
     assert_eq!(town_lynches(&mut g, p(0)), DayOutcome::Eliminated(p(0)));
     assert_eq!(g.winner(), Some(Winner::Villagers));
     assert_eq!(g.phase(), Phase::Ended);
+    assert_eq!(g.round(), 1);
+    assert_eq!(g.alive_count_by_role(), (4, 0));
 }
 
 #[test]
 fn villagers_win_by_lynching_both_wolves_on_successive_days() {
-    let mut g = game(&[W, W, V, V, V, V, V, V]);
+    let mut g = night_game(&[W, W, V, V, V, V, V, V]);
     wolves_kill(&mut g, p(2)); // night 1
-    town_lynches(&mut g, p(0)); // day 1: first wolf
+    town_lynches(&mut g, p(0)); // day 2: first wolf
     assert_eq!(g.winner(), None);
 
     wolves_kill(&mut g, p(3)); // night 2
-    town_lynches(&mut g, p(1)); // day 2: last wolf
+    town_lynches(&mut g, p(1)); // day 3: last wolf
     assert_eq!(g.winner(), Some(Winner::Villagers));
-    assert_eq!(g.round(), 2);
+    assert_eq!(g.round(), 3);
 }
 
 #[test]
 fn villagers_win_on_the_last_possible_day() {
     // Six players, one wolf: the town ties votes while the wolf whittles them down, then lynches it at P0, P4, P5.
-    let mut g = game(&[W, V, V, V, V, V]);
+    let mut g = night_game(&[W, V, V, V, V, V]);
     wolves_kill(&mut g, p(1));
     town_ties(&mut g);
     wolves_kill(&mut g, p(2));
@@ -489,7 +492,7 @@ fn villagers_win_on_the_last_possible_day() {
 
 #[test]
 fn villagers_win_when_the_pack_devours_its_own() {
-    let mut g = game(&[W, W, V, V, V, V]);
+    let mut g = night_game(&[W, W, V, V, V, V]);
     wolves_kill(&mut g, p(1)); // both wolves agree to kill wolf P1
     assert_eq!(g.alive_count_by_role(), (4, 1));
 
@@ -500,7 +503,7 @@ fn villagers_win_when_the_pack_devours_its_own() {
 #[test]
 fn villagers_can_win_without_losing_anyone() {
     // Nine players, three wolves: the wolves kill each other and the town lynches one, leaving every villager alive.
-    let mut g = game(&[W, W, W, V, V, V, V, V, V]);
+    let mut g = night_game(&[W, W, W, V, V, V, V, V, V]);
     wolves_kill(&mut g, p(2)); // wolves kill wolf P2
     town_lynches(&mut g, p(1)); // town lynches wolf P1
     wolves_kill(&mut g, p(0)); // last wolf targets itself
@@ -515,7 +518,7 @@ fn villagers_can_win_without_losing_anyone() {
 
 #[test]
 fn werewolves_win_by_attrition_while_the_town_dithers() {
-    let mut g = game(&[W, V, V, V, V]);
+    let mut g = night_game(&[W, V, V, V, V]);
     wolves_kill(&mut g, p(1));
     town_ties(&mut g);
     wolves_kill(&mut g, p(2));
@@ -529,7 +532,7 @@ fn werewolves_win_by_attrition_while_the_town_dithers() {
 
 #[test]
 fn werewolves_win_after_a_single_mislynch() {
-    let mut g = game(&[W, V, V, V, V]);
+    let mut g = night_game(&[W, V, V, V, V]);
     wolves_kill(&mut g, p(1)); // 3 villagers, 1 wolf
     town_lynches(&mut g, p(2)); // mislynch -> 2 villagers, 1 wolf
     wolves_kill(&mut g, p(3)); // 1 vs 1
@@ -539,7 +542,7 @@ fn werewolves_win_after_a_single_mislynch() {
 
 #[test]
 fn werewolves_win_at_day_resolution_when_a_lynch_reaches_parity() {
-    let mut g = game(&[W, W, V, V, V, V, V, V]);
+    let mut g = night_game(&[W, W, V, V, V, V, V, V]);
     wolves_kill(&mut g, p(2)); // 5 villagers, 2 wolves
     town_lynches(&mut g, p(3)); // mislynch -> 4 villagers, 2 wolves
     wolves_kill(&mut g, p(4)); // 3 villagers, 2 wolves
@@ -552,7 +555,7 @@ fn werewolves_win_at_day_resolution_when_a_lynch_reaches_parity() {
 
 #[test]
 fn werewolves_win_at_night_with_no_day_in_between() {
-    let mut g = game(&[W, W, V, V, V, V, V, V]);
+    let mut g = night_game(&[W, W, V, V, V, V, V, V]);
     wolves_kill(&mut g, p(2)); // 5 villagers, 2 wolves
     town_lynches(&mut g, p(3)); // 4 villagers, 2 wolves
     wolves_kill(&mut g, p(4)); // 3 villagers, 2 wolves
@@ -568,7 +571,7 @@ fn werewolves_win_at_night_with_no_day_in_between() {
 fn werewolves_win_a_long_twelve_player_game() {
     let mut roles = vec![W, W, W];
     roles.extend(std::iter::repeat_n(V, 9));
-    let mut g = game(&roles);
+    let mut g = night_game(&roles);
 
     for target in 3..8 {
         wolves_kill(&mut g, p(target));
@@ -586,11 +589,11 @@ fn werewolves_win_a_long_twelve_player_game() {
 // ---------------------------------------------------------------------------
 
 #[test]
-fn a_tied_vote_eliminates_nobody_and_advances_the_round() {
-    let mut g = game(&[W, V, V, V, V, V]);
+fn a_tied_vote_eliminates_nobody_and_preserves_the_round() {
+    let mut g = night_game(&[W, V, V, V, V, V]);
     wolves_kill(&mut g, p(1));
     let alive_before = g.alive().count();
-    assert_eq!(g.round(), 1);
+    assert_eq!(g.round(), 2);
 
     assert_eq!(town_ties(&mut g), DayOutcome::NoElimination);
     assert_eq!(g.phase(), Phase::Night);
@@ -600,7 +603,7 @@ fn a_tied_vote_eliminates_nobody_and_advances_the_round() {
 
 #[test]
 fn pending_actors_tracks_who_still_owes_an_action() {
-    let mut g = game(&[W, W, V, V, V, V, V, V]);
+    let mut g = night_game(&[W, W, V, V, V, V, V, V]);
     assert_eq!(g.pending_actors(), vec![p(0), p(1)]);
     g.night_action(p(0), p(2)).unwrap();
     assert_eq!(g.pending_actors(), vec![p(1)]);
@@ -619,32 +622,49 @@ fn pending_actors_tracks_who_still_owes_an_action() {
 }
 
 #[test]
-fn round_only_advances_day_to_night_and_votes_clear_on_transition() {
-    let mut g = game(&[W, V, V, V, V, V]);
-    assert_eq!(g.round(), 1);
-    assert!(g.current_votes().is_empty());
-
-    g.night_action(p(0), p(1)).unwrap();
-    g.resolve_night().unwrap(); // night -> day does not bump the round
-    assert_eq!(g.round(), 1);
-    assert!(g.current_votes().is_empty());
-
-    open_voting(&mut g);
-    g.vote(p(0), p(0)).unwrap();
-    assert_eq!(g.current_votes().len(), 1);
-    for voter in living_ids(&g).into_iter().filter(|id| *id != p(0)) {
-        g.vote(voter, voter).unwrap();
+fn opening_day_gates_voting_and_round_advances_only_after_night() {
+    for eliminate in [false, true] {
+        let mut g = Engine::with_roles(&[W, V, V, V, V, V]).unwrap();
+        assert_eq!(g.phase(), Phase::Day);
+        assert_eq!(g.round(), 1);
+        assert_eq!(g.pending_actors(), living_ids(&g));
+        assert!(!g.voting_open());
+        assert!(g.ready_players().is_empty());
+        assert!(g.current_votes().is_empty());
+        assert!(g.current_night_picks().is_empty());
+        let before = g.clone();
+        assert_eq!(g.vote(p(0), p(1)), Err(GameError::VotingNotOpen));
+        assert_eq!(g.resolve_day(), Err(GameError::VotingNotOpen));
+        assert!(matches!(
+            g.night_action(p(0), p(1)),
+            Err(GameError::WrongPhase { .. })
+        ));
+        assert!(matches!(
+            g.resolve_night(),
+            Err(GameError::WrongPhase { .. })
+        ));
+        assert_eq!(g, before);
+        if eliminate {
+            assert_eq!(town_lynches(&mut g, p(1)), DayOutcome::Eliminated(p(1)));
+        } else {
+            assert_eq!(town_ties(&mut g), DayOutcome::NoElimination);
+        }
+        assert_eq!(g.phase(), Phase::Night);
+        assert_eq!(g.round(), 1);
+        assert!(g.current_votes().is_empty());
+        assert!(g.ready_players().is_empty());
+        wolves_kill(&mut g, p(2));
+        assert_eq!(g.phase(), Phase::Day);
+        assert_eq!(g.round(), 2);
+        assert!(!g.voting_open());
+        assert!(g.ready_players().is_empty());
+        assert_eq!(g.pending_actors(), living_ids(&g));
     }
-    assert_eq!(g.current_votes().len(), 5);
-
-    g.resolve_day().unwrap(); // day -> night bumps the round and clears votes
-    assert_eq!(g.round(), 2);
-    assert!(g.current_votes().is_empty());
 }
 
 #[test]
 fn alive_counts_follow_every_kill_and_lynch() {
-    let mut g = game(&[W, W, V, V, V, V, V, V]);
+    let mut g = night_game(&[W, W, V, V, V, V, V, V]);
     assert_eq!(g.alive_count_by_role(), (6, 2));
     wolves_kill(&mut g, p(2));
     assert_eq!(g.alive_count_by_role(), (5, 2));
@@ -679,8 +699,8 @@ fn identical_rosters_and_commands_produce_identical_games() {
         g.resolve_day().unwrap();
     }
 
-    let mut a = game(&roles);
-    let mut b = game(&roles);
+    let mut a = night_game(&roles);
+    let mut b = night_game(&roles);
     play(&mut a);
     play(&mut b);
 

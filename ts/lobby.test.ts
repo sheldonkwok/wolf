@@ -172,7 +172,7 @@ test("a successful start hands over a fresh engine", () => {
   const lobby = lobbyWith(7);
   const game = lobby.startWithSeed("u0", 1n);
   expect(game.state().players.length).toBe(7);
-  expect(game.state().phase).toBe("Night");
+  expect(game.state().phase).toBe("Day");
   expect(game.state().round).toBe(1);
 
   expect(lobby.state).toBe("InGame");
