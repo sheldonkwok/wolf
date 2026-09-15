@@ -249,7 +249,12 @@ test("real engine games finish for every lobby size and can restart", () => {
       }
       expect(old).toBeDefined();
       expect(t.messages.some(m => m.destination === "channel" && m.text.includes("win!"))).toBe(true);
-      expect(t.lobby.size).toBe(count);
+      expect(t.lobby.state).toBe("Waiting");
+      expect(t.lobby.size).toBe(0);
+      expect(t.lobby.host).toBeNull();
+      expect(t.command("status")[0]?.text).toContain("Lobby: 0/12");
+      expect(t.receive({ kind: "choice", user: `U${wolf}`, channel: "DTEST", value: old })[0]?.text).toContain("not in an active game");
+      for (let seat = 0; seat < count; seat++) t.command("join", `U${seat}`);
       t.command("start");
       expect(t.lobby.game!.state().round).toBe(1);
       expect(t.receive({ kind: "choice", user: `U${wolf}`, channel: "DTEST", value: old })[0]?.text).toContain("expired");
@@ -279,7 +284,7 @@ test("delivery retries failed messages in order without replaying mutations", as
   expect(delivered[1]?.text).toContain("<@U1> joined");
 });
 
-test("werewolf victory at night announces the winner and restores the lobby", () => {
+test("werewolf victory at night opens a fresh lobby with a new host", () => {
   const t = table(5);
   t.command("start");
   reachNight(t);
@@ -290,9 +295,19 @@ test("werewolf victory at night announces the winner and restores the lobby", ()
   for (const seat of state.pendingActors) t.choose(seat, target);
   morning(t);
   expect(t.lobby.game).toBeNull();
-  expect(t.messages.some(m => m.destination === "channel" && m.text.startsWith("Werewolves win!"))).toBe(true);
-  t.command("leave");
-  expect(t.lobby.host?.user).toBe("U1");
+  const announcement = t.messages.find(m => m.destination === "channel" && m.text.startsWith("Werewolves win!"))!;
+  expect(announcement.text).toContain("A new lobby is open!");
+  expect(announcement.text).toContain("@Wolf join");
+  for (const player of state.players) expect(announcement.text).toContain(`<@U${player.id}>: ${player.role}`);
+  expect(t.lobby.isEmpty).toBe(true);
+  expect(t.command("start")[0]?.text).toContain("Only the host");
+  t.command("join", "NEW_HOST");
+  expect(t.lobby.host?.user).toBe("NEW_HOST");
+  for (let seat = 0; seat < 4; seat++) t.command("join", `U${seat}`);
+  expect(t.command("start")[0]?.text).toContain("Only the host");
+  t.command("start", "NEW_HOST");
+  expect(t.lobby.game!.state().phase).toBe("Day");
+  expect(t.lobby.game!.state().round).toBe(1);
 });
 
 test("configuration requires tokens and a public channel ID without exposing secrets", () => {
@@ -381,8 +396,9 @@ test("dev games fill with bots, wait for humans, finish after elimination, and c
       eliminatedHumans += t.messages.filter(m => m.destination === "dm" && m.text.startsWith("You were eliminated.")).length;
       expect(t.messages.every(m => m.destination === "channel" || m.user === "OUTSIDER" || /^U\d+$/.test(m.user!))).toBe(true);
       expect(t.messages.every(m => !m.text.includes("<@bot-"))).toBe(true);
-      expect(t.lobby.members.map(m => m.user)).toEqual(Array.from({ length: humans }, (_, i) => `U${i}`));
-      expect(t.lobby.host?.user).toBe("U0");
+      expect(t.lobby.members).toEqual([]);
+      expect(t.lobby.host).toBeNull();
+      for (let seat = 0; seat < humans; seat++) t.command("join", `U${seat}`);
       expect(t.command("start")[0]?.text).toContain("started with 5 players");
     }
   }

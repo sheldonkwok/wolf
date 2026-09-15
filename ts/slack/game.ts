@@ -213,10 +213,11 @@ export class SlackGame {
   private announcePhase(): void {
     const state = this.lobby.game!.state();
     if (state.isOver) {
-      this.publish(`${state.winner} win!\n${state.players.map(p => `${this.mention(p.id)}: ${p.role}`).join("\n")}\nThe host can use \`@Wolf start\` to play again. Players can leave or join before the next game.`);
+      this.publish(`${state.winner} win!\n${state.players.map(p => `${this.mention(p.id)}: ${p.role}`).join("\n")}\nA new lobby is open! Use \`@Wolf join\` to play again. The first player to join becomes host and can use \`@Wolf start\` once everyone is ready.`);
       this.lobby.endGame();
-      for (const user of this.bots) this.lobby.leave(user);
+      for (const { user } of [...this.lobby.members]) this.lobby.leave(user);
       this.bots.clear();
+      this.prompt = "";
       return;
     }
     if (state.phase === "Night") {

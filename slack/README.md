@@ -47,7 +47,7 @@ The repository declares `undici` directly and uses `patchedDependencies` to redi
 
 ## Play
 
-For solo testing, run `bun run slackbot -- --dev`, then use `@Wolf join` and `@Wolf start`. Dev mode fills the game to five players with named bots. Bots take night actions and elimination votes automatically; bot wolves follow a human wolf's night target. Your `ready` or `vote` command supplies enough readiness to open elimination voting in a solo game, then you choose your elimination target in the DM. If all humans are eliminated, bots finish the game automatically. Bots receive no Slack DMs and leave the lobby after the game, so humans can join or leave before restarting. Without `--dev`, the normal player minimum and readiness rules apply.
+For solo testing, run `bun run slackbot -- --dev`, then use `@Wolf join` and `@Wolf start`. Dev mode fills the game to five players with named bots. Bots take night actions and elimination votes automatically; bot wolves follow a human wolf's night target. Your `ready` or `vote` command supplies enough readiness to open elimination voting in a solo game, then you choose your elimination target in the DM. If all humans are eliminated, bots finish the game automatically. Bots receive no Slack DMs. After the game, the lobby is emptied; use `@Wolf join` and `@Wolf start` to play again with fresh bots. Without `--dev`, the normal player minimum and readiness rules apply.
 
 - In your configured `#werewolf` or `#werewolf-test` channel, mention the bot: `@Wolf join`. The first player is host; 5–12 players can join.
 - `@Wolf leave` leaves a waiting lobby; if the host leaves, the next player becomes host.
@@ -57,7 +57,7 @@ For solo testing, run `bun run slackbot -- --dev`, then use `@Wolf join` and `@W
 - Readiness counts each living player once and resets each day. Status shows progress toward the required majority. Readiness opens voting; it does not cast an elimination vote or advance directly to night.
 - Each day vote is final. When all living players have voted, the engine resolves the result. A tie eliminates nobody; play continues until a team wins.
 - `@Wolf status` displays the public roster and phase. DM `status` to recover your role and any outstanding choice buttons. `@Wolf help` shows commands privately.
-- After a win, the channel gets the final roles and the roster returns to the waiting lobby. Players may join or leave, and the host can start again.
+- After a win, the channel gets the final roles and a new empty lobby opens. Use `@Wolf join` to play again; the first player to join becomes the new host and can use `@Wolf start` once enough players have joined.
 
 Game commands from other channels are ignored. Night choices, pack membership, and pending actor identities stay private. Stale buttons, duplicate event deliveries, outsiders, eliminated players, and duplicate votes cannot advance the game incorrectly. Target legality and outcomes are decided by the Rust engine, including its allowance for self-targets.
 
