@@ -24,6 +24,7 @@ export type GameErrorCode =
   | "UnknownPlayer"
   | "PlayerNotAlive"
   | "NotAWerewolf"
+  | "LastWolfCannotTargetSelf"
   | "WrongPhase"
   | "AlreadyActed"
   | "VotingNotOpen"

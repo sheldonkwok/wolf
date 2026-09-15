@@ -501,15 +501,40 @@ fn villagers_win_when_the_pack_devours_its_own() {
 }
 
 #[test]
-fn villagers_can_win_without_losing_anyone() {
-    // Nine players, three wolves: the wolves kill each other and the town lynches one, leaving every villager alive.
+fn the_last_surviving_wolf_cannot_kill_itself() {
     let mut g = night_game(&[W, W, W, V, V, V, V, V, V]);
     wolves_kill(&mut g, p(2)); // wolves kill wolf P2
     town_lynches(&mut g, p(1)); // town lynches wolf P1
-    wolves_kill(&mut g, p(0)); // last wolf targets itself
+    assert_eq!(
+        g.night_action(p(0), p(0)),
+        Err(GameError::LastWolfCannotTargetSelf)
+    );
+    assert_eq!(g.winner(), None);
+    assert_eq!(g.alive_count_by_role(), (6, 1));
+    assert_eq!(g.pending_actors(), vec![p(0)]);
+    assert!(g.current_night_picks().is_empty());
+    assert_eq!(
+        g.resolve_night(),
+        Err(GameError::ActionsIncomplete {
+            waiting_on: vec![p(0)]
+        })
+    );
+    assert_eq!(wolves_kill(&mut g, p(3)), NightOutcome::Killed(p(3)));
+}
 
-    assert_eq!(g.winner(), Some(Winner::Villagers));
-    assert_eq!(g.alive_count_by_role(), (6, 0));
+#[test]
+fn a_lone_wolf_cannot_replace_a_valid_pick_with_itself() {
+    let mut g = night_game(&[W, V, V, V, V]);
+    g.night_action(p(0), p(1)).unwrap();
+    assert_eq!(
+        g.night_action(p(0), p(0)),
+        Err(GameError::LastWolfCannotTargetSelf)
+    );
+    assert_eq!(
+        g.current_night_picks(),
+        [(p(0), p(1))].into_iter().collect()
+    );
+    assert_eq!(g.resolve_night().unwrap(), NightOutcome::Killed(p(1)));
 }
 
 // ---------------------------------------------------------------------------

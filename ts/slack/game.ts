@@ -1,5 +1,5 @@
 import { attempt, GameError, Rng, timeSeed } from "../engine.js";
-import { randomLivingVillager, villagerBotVote } from "../bots.js";
+import { livingWolves, randomLivingVillager, villagerBotVote } from "../bots.js";
 import { Lobby, LobbyError } from "../lobby.js";
 
 export interface Choice {
@@ -237,11 +237,12 @@ export class SlackGame {
     const state = this.lobby.game!.state();
     const seat = this.lobby.seatOf(user)!;
     if (!state.pendingActors.includes(seat) || (state.phase === "Day" && !state.votingOpen)) return;
+    const excludeSelf = state.phase === "Night" && livingWolves(state).length === 1;
     this.messages.push({
       destination: "dm",
       user,
       text: `${state.phase} ${state.round}: ${state.phase === "Night" ? "choose the pack's target. All wolves must agree" : "choose who to eliminate. Your vote is final"}.\n${this.livingRoster()}`,
-      choices: state.players.filter(p => p.alive).map(p => ({
+      choices: state.players.filter(p => p.alive && (!excludeSelf || p.id !== seat)).map(p => ({
         label: `Player ${p.id + 1}`,
         value: `${this.prompt}:${user}:${p.id}`,
       })),

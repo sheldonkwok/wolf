@@ -80,6 +80,16 @@ test("a split pack resolves to NoConsensus and stays in Night", () => {
   expect(game.state().phase).toBe("Night");
 });
 
+test("a lone wolf cannot target itself and a rejected pick leaves state unchanged", () => {
+  const game = Game.withRoles(["Werewolf", "Villager", "Villager", "Villager", "Villager"]);
+  reachNight(game);
+  const before = game.state();
+  expect(grab(() => game.nightAction(0, 0)).code).toBe("LastWolfCannotTargetSelf");
+  expect(game.state()).toEqual(before);
+  game.nightAction(0, 1);
+  expect(normalizeNight(game.resolveNight())).toEqual({ kind: "Killed", killed: 1 });
+});
+
 test("readiness crosses the binding, gates votes, and clears after resolution", () => {
   const game = Game.withRoles(["Werewolf", "Villager", "Villager", "Villager", "Villager"]);
   reachNight(game);

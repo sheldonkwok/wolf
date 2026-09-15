@@ -100,6 +100,33 @@ test("roles, pack, prompts, and night progress stay private", () => {
   expect(t.command("status")[0]?.text).not.toMatch(/pending|pack|Werewolf|Villager/);
 });
 
+for (const count of [5, 8]) {
+  test(`the last wolf's night prompt excludes itself with ${count} starting players`, () => {
+    const t = table(count);
+    t.command("start");
+    const wolves = t.lobby.game!.state().players.filter(p => p.role === "Werewolf");
+    const wolf = wolves[0]!.id;
+    if (wolves.length === 1) reachNight(t);
+    else {
+      openVoting(t);
+      for (const seat of t.lobby.game!.state().pendingActors) t.choose(seat, wolves[1]!.id);
+    }
+    const before = t.lobby.game!.state();
+    expect(before.phase).toBe("Night");
+    const user = `U${wolf}`;
+    const prompt = t.dm(user).find(m => m.choices)!;
+    expect(prompt.choices!.map(c => c.label)).toEqual(
+      before.players.filter(p => p.alive && p.id !== wolf).map(p => `Player ${p.id + 1}`),
+    );
+    const forged = prompt.choices![0]!.value.replace(/:\d+$/, `:${wolf}`);
+    const output = t.receive({ kind: "choice", user, channel: `D${user}`, value: forged });
+    expect(output[0]?.text).toContain("cannot target themselves at night");
+    expect(t.lobby.game!.state()).toEqual(before);
+    morning(t);
+    expect(t.lobby.game!.state().phase).toBe("Day");
+  });
+}
+
 test("night disagreement starts a private revote and invalidates old buttons", () => {
   const t = table();
   t.command("start");

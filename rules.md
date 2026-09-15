@@ -52,7 +52,7 @@ The Moderator speaks aloud while everyone keeps their eyes tightly shut:
 
 1. **"Night falls on the village. Everyone close your eyes!"**
 2. **"Werewolves, open your eyes and pick your target."**  
-   *(Werewolves open eyes, point silently to one victim, then close eyes).*
+   *(Werewolves open eyes, point silently to one victim, then close eyes). If only one Werewolf is alive, they cannot target themselves.*
 3. **"Doctor, open your eyes and choose someone to save."**  
    *(Doctor opens eyes, points to one player—can be themselves—then closes eyes).*
 4. **"Seer, open your eyes and pick someone to inspect."**  

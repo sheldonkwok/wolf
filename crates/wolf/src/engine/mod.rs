@@ -138,6 +138,10 @@ impl Engine {
         }
         self.require_alive(target)?;
 
+        if wolf == target && self.alive_count_by_role().1 == 1 {
+            return Err(GameError::LastWolfCannotTargetSelf);
+        }
+
         self.night_picks.insert(wolf, target);
         Ok(())
     }

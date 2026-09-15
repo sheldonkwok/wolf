@@ -15,6 +15,8 @@ pub enum GameError {
     PlayerNotAlive(PlayerId),
     /// A non-werewolf tried to take the werewolves' night action.
     NotAWerewolf(PlayerId),
+    /// The last living werewolf cannot choose themselves as the night target.
+    LastWolfCannotTargetSelf,
     /// The command is not legal in the current phase.
     WrongPhase { expected: Phase, actual: Phase },
     /// This player already signaled readiness or cast their final day vote.
@@ -38,6 +40,7 @@ impl GameError {
             GameError::UnknownPlayer(_) => "UnknownPlayer",
             GameError::PlayerNotAlive(_) => "PlayerNotAlive",
             GameError::NotAWerewolf(_) => "NotAWerewolf",
+            GameError::LastWolfCannotTargetSelf => "LastWolfCannotTargetSelf",
             GameError::WrongPhase { .. } => "WrongPhase",
             GameError::AlreadyActed(_) => "AlreadyActed",
             GameError::VotingNotOpen => "VotingNotOpen",
@@ -58,6 +61,12 @@ impl fmt::Display for GameError {
             GameError::UnknownPlayer(id) => write!(f, "no such player: {id}"),
             GameError::PlayerNotAlive(id) => write!(f, "player {id} is not alive"),
             GameError::NotAWerewolf(id) => write!(f, "player {id} is not a werewolf"),
+            GameError::LastWolfCannotTargetSelf => {
+                write!(
+                    f,
+                    "the last living werewolf cannot target themselves at night"
+                )
+            }
             GameError::WrongPhase { expected, actual } => {
                 write!(
                     f,

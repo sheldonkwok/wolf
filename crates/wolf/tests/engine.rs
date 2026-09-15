@@ -83,8 +83,13 @@ fn play_out(g: &mut Engine, rng: &mut Rng, unanimous_town: bool) {
         }
         match g.phase() {
             Phase::Night => {
-                let victim = rng.pick(&living_ids(g));
-                for wolf in living_wolf_ids(g) {
+                let wolves = living_wolf_ids(g);
+                let targets: Vec<_> = living_ids(g)
+                    .into_iter()
+                    .filter(|id| wolves.len() > 1 || *id != wolves[0])
+                    .collect();
+                let victim = rng.pick(&targets);
+                for wolf in wolves {
                     g.night_action(wolf, victim).expect("wolf night action");
                 }
                 assert_eq!(
