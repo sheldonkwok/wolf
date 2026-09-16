@@ -1,0 +1,14 @@
+.git
+.agents
+.codex
+.claude
+.idea
+.vscode
+**/node_modules
+**/target
+ts/native
+**/.env
+**/.env.*
+**/*.test.ts
+coverage
+*.log
