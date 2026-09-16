@@ -91,7 +91,9 @@ test("roles, pack, prompts, and night progress stay private", () => {
     expect(role.text).toContain(player.role);
     expect(role.text.includes("Your pack:")).toBe(player.role === "Werewolf");
   }
-  const publicText = output.filter(m => m.destination === "channel").map(m => m.text).join("\n");
+  expect(output.find(m => m.destination === "channel" && m.text.startsWith("The game has started"))?.text)
+    .toBe("The game has started with 8 players. Teams: 2 Werewolves and 6 Villagers. Roles are in your DMs.");
+  const publicText = output.filter(m => m.destination === "channel" && !m.text.startsWith("The game has started")).map(m => m.text).join("\n");
   expect(publicText).not.toMatch(/pack|Werewolf|Villager/);
   reachNight(t);
   expect(t.messages.filter(m => m.choices && m.text.startsWith("Night 1:")).length).toBe(wolves.length);
@@ -256,8 +258,12 @@ test("real engine games finish for every lobby size and can restart", () => {
   for (let count = 5; count <= 12; count++) {
     for (let seed = 0n; seed < 10n; seed++) {
       const t = table(count, seed);
-      t.command("start");
+      const start = t.command("start");
       const firstState = t.lobby.game!.state();
+      const wolves = firstState.players.filter(p => p.role === "Werewolf").length;
+      const villagers = firstState.players.filter(p => p.role === "Villager").length;
+      expect(start.find(m => m.destination === "channel" && m.text.startsWith("The game has started"))?.text)
+        .toBe(`The game has started with ${count} players. Teams: ${wolves} ${wolves === 1 ? "Werewolf" : "Werewolves"} and ${villagers} Villagers. Roles are in your DMs.`);
       const wolf = firstState.pendingActors[0]!;
       let old: string | undefined;
       let turns = 0;

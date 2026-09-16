@@ -71,7 +71,7 @@ export class SlackGame {
         this.lobby.leave(user);
         this.publish(`<@${user}> left. ${this.roster()}`);
         break;
-      case "start":
+      case "start": {
         if (!this.lobby.isHost(user)) throw new CommandError("Only the host can start the game.");
         if (this.lobby.game?.state().isOver) this.lobby.endGame();
         if (this.dev && !this.lobby.game) {
@@ -81,13 +81,14 @@ export class SlackGame {
             this.bots.add(user);
           }
         }
-        this.lobby.start(user);
+        const { aliveVillagers, aliveWolves } = this.lobby.start(user).state();
         this.prompt = crypto.randomUUID();
-        this.publish(`The game has started with ${this.lobby.size} players. Roles are in your DMs.`);
+        this.publish(`The game has started with ${this.lobby.size} players. Teams: ${aliveWolves} ${aliveWolves === 1 ? "Werewolf" : "Werewolves"} and ${aliveVillagers} Villagers. Roles are in your DMs.`);
         for (const member of this.lobby.members) this.sendRole(member.user);
         this.announcePhase();
         this.advance();
         break;
+      }
       case "vote":
       case "ready":
       case "ready to vote":
