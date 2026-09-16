@@ -20,7 +20,7 @@ export type SlackInput = {
   channel: string;
 } & ({ kind: "mention" | "dm"; text: string } | { kind: "choice"; value: string });
 
-const HELP = "In the game channel: `@Wolf join`, `leave`, `start`, `status`, `vote`, `ready`, or `help`. The first player is host; only the host starts games. Tell me `ready to vote` in the game channel or a DM when you are ready. More than half of the living players must be ready to open elimination voting. Use the buttons in my DMs for secret choices. DM `status` to get your role and current prompt again.";
+const HELP = "In the game channel: `@werewolf join`, `leave`, `start`, `status`, `vote`, `ready`, or `help`. The first player is host; only the host starts games. Tell me `ready to vote` in the game channel or a DM when you are ready. More than half of the living players must be ready to open elimination voting. Use the buttons in my DMs for secret choices. DM `status` to get your role and current prompt again.";
 
 export class SlackGame {
   private readonly seen = new Set<string>();
@@ -115,7 +115,7 @@ export class SlackGame {
     const state = game.state();
     this.dm(user, "You are ready to vote.");
     if (!state.votingOpen) {
-      this.publish(`${state.readyPlayers.length}/${state.readinessRequired} players ready to open elimination voting. Use \`@Wolf ready\` or DM \`ready\` when you are ready.`);
+      this.publish(`${state.readyPlayers.length}/${state.readinessRequired} players ready to open elimination voting. Use \`@werewolf ready\` or DM \`ready\` when you are ready.`);
       return;
     }
     this.openVoting();
@@ -214,7 +214,7 @@ export class SlackGame {
   private announcePhase(): void {
     const state = this.lobby.game!.state();
     if (state.isOver) {
-      this.publish(`${state.winner} win!\n${state.players.map(p => `${this.mention(p.id)}: ${p.role}`).join("\n")}\nA new lobby is open! Use \`@Wolf join\` to play again. The first player to join becomes host and can use \`@Wolf start\` once everyone is ready.`);
+      this.publish(`${state.winner} win!\n${state.players.map(p => `${this.mention(p.id)}: ${p.role}`).join("\n")}\nA new lobby is open! Use \`@werewolf join\` to play again. The first player to join becomes host and can use \`@werewolf start\` once everyone is ready.`);
       this.lobby.endGame();
       for (const { user } of [...this.lobby.members]) this.lobby.leave(user);
       this.bots.clear();
@@ -225,7 +225,7 @@ export class SlackGame {
       this.publish(`Night ${state.round}. The village sleeps. Werewolves, check your DMs.`);
       this.promptActors();
     } else {
-      this.publish(`Day ${state.round}. Discuss in <#${this.channel}>. Use \`@Wolf ready\` or DM \`ready to vote\` when you are ready. Elimination voting opens when more than half of the living players are ready (${state.readinessRequired} needed).${this.dev ? " Dev bots add their readiness when a human is ready; one human is enough in a solo game." : ""}\n${this.livingRoster()}`);
+      this.publish(`Day ${state.round}. Discuss in <#${this.channel}>. Use \`@werewolf ready\` or DM \`ready to vote\` when you are ready. Elimination voting opens when more than half of the living players are ready (${state.readinessRequired} needed).${this.dev ? " Dev bots add their readiness when a human is ready; one human is enough in a solo game." : ""}\n${this.livingRoster()}`);
     }
   }
 
@@ -262,7 +262,7 @@ export class SlackGame {
 
   private privateStatus(user: string): void {
     if (!this.lobby.contains(user) || !this.lobby.game) {
-      this.dm(user, `Join the next game with \`@Wolf join\` in <#${this.channel}>.\n${this.help()}`);
+      this.dm(user, `Join the next game with \`@werewolf join\` in <#${this.channel}>.\n${this.help()}`);
       return;
     }
     this.sendRole(user);

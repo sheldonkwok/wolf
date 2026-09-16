@@ -330,7 +330,7 @@ test("werewolf victory at night opens a fresh lobby with a new host", () => {
   expect(t.lobby.game).toBeNull();
   const announcement = t.messages.find(m => m.destination === "channel" && m.text.startsWith("Werewolves win!"))!;
   expect(announcement.text).toContain("A new lobby is open!");
-  expect(announcement.text).toContain("@Wolf join");
+  expect(announcement.text).toContain("@werewolf join");
   for (const player of state.players) expect(announcement.text).toContain(`<@U${player.id}>: ${player.role}`);
   expect(t.lobby.isEmpty).toBe(true);
   expect(t.command("start")[0]?.text).toContain("Only the host");

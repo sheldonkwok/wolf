@@ -37,7 +37,7 @@ The repository manifest already sets `features.app_home.messages_tab_enabled` to
 
 In the Slack app settings, open **Event Subscriptions**, turn **Enable Events** on, and ensure **Subscribe to bot events** includes `app_mention` and `message.im`. Save changes and reinstall if Slack prompts you. Scopes such as `app_mentions:read` grant access; event subscriptions separately tell Slack which events to send. See [Slack's event setup instructions](https://docs.slack.dev/tools/bolt-js/creating-an-app/#subscribing-to-events).
 
-Restart `bun run slackbot`, then send `@Wolf status` in your configured game channel, selecting the actual bot from Slack's mention picker. Startup prints the connected bot identity and channel ID. The terminal prints `Slack app_mention received.` for incoming mentions, an explanation for ignored mentions, and `Slack reply sent (channel).` after a successful status reply. These logs omit message contents and tokens. If no incoming mention appears, check the event subscription, that both tokens belong to the same app, and that only one bot process is running.
+Restart `bun run slackbot`, then send `@werewolf status` in your configured game channel, selecting the actual bot from Slack's mention picker. Startup prints the connected bot identity and channel ID. The terminal prints `Slack app_mention received.` for incoming mentions, an explanation for ignored mentions, and `Slack reply sent (channel).` after a successful status reply. These logs omit message contents and tokens. If no incoming mention appears, check the event subscription, that both tokens belong to the same app, and that only one bot process is running.
 
 ## Bun Socket Mode compatibility
 
@@ -47,17 +47,17 @@ The repository declares `undici` directly and uses `patchedDependencies` to redi
 
 ## Play
 
-For solo testing, run `bun run slackbot -- --dev`, then use `@Wolf join` and `@Wolf start`. Dev mode fills the game to five players with named bots. Bots take night actions and elimination votes automatically; bot wolves follow a human wolf's night target. Your `ready` or `vote` command supplies enough readiness to open elimination voting in a solo game, then you choose your elimination target in the DM. If all humans are eliminated, bots finish the game automatically. Bots receive no Slack DMs. After the game, the lobby is emptied; use `@Wolf join` and `@Wolf start` to play again with fresh bots. Without `--dev`, the normal player minimum and readiness rules apply.
+For solo testing, run `bun run slackbot -- --dev`, then use `@werewolf join` and `@werewolf start`. Dev mode fills the game to five players with named bots. Bots take night actions and elimination votes automatically; bot wolves follow a human wolf's night target. Your `ready` or `vote` command supplies enough readiness to open elimination voting in a solo game, then you choose your elimination target in the DM. If all humans are eliminated, bots finish the game automatically. Bots receive no Slack DMs. After the game, the lobby is emptied; use `@werewolf join` and `@werewolf start` to play again with fresh bots. Without `--dev`, the normal player minimum and readiness rules apply.
 
-- In your configured `#werewolf` or `#werewolf-test` channel, mention the bot: `@Wolf join`. The first player is host; 5–12 players can join.
-- `@Wolf leave` leaves a waiting lobby; if the host leaves, the next player becomes host.
-- The host uses `@Wolf start`. Everyone receives their role privately. Wolves also learn their pack. Games begin with Day 1 discussion and everyone alive; a majority must be ready before the first elimination vote. Play proceeds Day 1 → Night 1 → Day 2.
+- In your configured `#werewolf` or `#werewolf-test` channel, mention the bot: `@werewolf join`. The first player is host; 5–12 players can join.
+- `@werewolf leave` leaves a waiting lobby; if the host leaves, the next player becomes host.
+- The host uses `@werewolf start`. Everyone receives their role privately. Wolves also learn their pack. Games begin with Day 1 discussion and everyone alive; a majority must be ready before the first elimination vote. Play proceeds Day 1 → Night 1 → Day 2.
 - At night, wolves choose a numbered player in their DM. The prompt maps each number to a Slack mention. Wolves can change a choice until all have chosen. If they disagree, all choose again using new buttons.
-- When night resolves, the channel receives the eliminated player's role and a discussion prompt. Any living player can use `@Wolf ready`, `@Wolf ready to vote`, or `@Wolf vote`, or DM `ready`, `ready to vote`, or `vote`. Once more than half of the living players are ready, private elimination voting opens for every living player. The host has no special control over voting, and there is no automatic timer.
+- When night resolves, the channel receives the eliminated player's role and a discussion prompt. Any living player can use `@werewolf ready`, `@werewolf ready to vote`, or `@werewolf vote`, or DM `ready`, `ready to vote`, or `vote`. Once more than half of the living players are ready, private elimination voting opens for every living player. The host has no special control over voting, and there is no automatic timer.
 - Readiness counts each living player once and resets each day. Status shows progress toward the required majority. Readiness opens voting; it does not cast an elimination vote or advance directly to night.
 - Each day vote is final. When all living players have voted, the engine resolves the result. A tie eliminates nobody; play continues until a team wins.
-- `@Wolf status` displays the public roster and phase. DM `status` to recover your role and any outstanding choice buttons. `@Wolf help` shows commands privately.
-- After a win, the channel gets the final roles and a new empty lobby opens. Use `@Wolf join` to play again; the first player to join becomes the new host and can use `@Wolf start` once enough players have joined.
+- `@werewolf status` displays the public roster and phase. DM `status` to recover your role and any outstanding choice buttons. `@werewolf help` shows commands privately.
+- After a win, the channel gets the final roles and a new empty lobby opens. Use `@werewolf join` to play again; the first player to join becomes the new host and can use `@werewolf start` once enough players have joined.
 
 Game commands from other channels are ignored. Night choices, pack membership, and pending actor identities stay private. Stale buttons, duplicate event deliveries, outsiders, eliminated players, and duplicate votes cannot advance the game incorrectly. Target legality and outcomes are decided by the Rust engine, including its allowance for self-targets.
 
