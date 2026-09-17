@@ -8,7 +8,7 @@ import {
   randomLivingVillager,
   villagerBotVote,
 } from "./bots.js";
-import { Game, GameError, Rng, timeSeed, type GameState } from "./engine.js";
+import { Game, Rng, timeSeed, type GameState } from "./engine.js";
 import { banner, nameOf, printRoster, roleTag } from "./render.js";
 
 // Matches wolf::Engine::MIN_PLAYERS.
@@ -220,7 +220,7 @@ class Table {
       }
       const outcome = this.game.resolveNight();
       if (outcome.kind === "Killed") {
-        this.nightVictim = outcome.killed ?? null;
+        this.nightVictim = outcome.killed;
         break;
       }
       // The pack is always unanimous, so this is only a safety net.
@@ -290,7 +290,7 @@ class Table {
 
     const outcome = this.game.resolveDay();
     if (outcome.kind === "Eliminated") {
-      const id = outcome.eliminated ?? 0;
+      const id = outcome.eliminated;
       console.log(`${nameOf(id)} was eliminated. (${roleTag(this.game.roleOf(id))})`);
     } else {
       console.log("The vote was tied for the lead. No one was eliminated.");
@@ -365,7 +365,7 @@ async function main(): Promise<void> {
   try {
     game = Game.withSeed(players, seed);
   } catch (thrown) {
-    console.error(`cannot start game: ${GameError.fromThrown(thrown).message}`);
+    console.error(`cannot start game: ${thrown instanceof Error ? thrown.message : String(thrown)}`);
     process.exit(2);
   }
 

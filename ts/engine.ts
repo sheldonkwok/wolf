@@ -1,8 +1,7 @@
-// Typed facade over the generated napi addon: real discriminated unions for the
-// resolve outcomes, and a GameError class reconstructed from the thrown message.
+// Typed game API over the native addon; error conversion and result validation stay here.
 
 import {
-  Game,
+  Game as NativeGame,
   Rng,
   timeSeed,
   type DayResult,
@@ -14,24 +13,27 @@ import {
   type Winner,
 } from "./native/index.js";
 
-export { Game, Rng, timeSeed };
-export type { DayResult, GameState, NightResult, PlayerView, Role, VoteView, Winner };
+export { Rng, timeSeed };
+export type { GameState, PlayerView, Role, VoteView, Winner };
 
 // Stable tags mirrored from wolf::GameError::code in the engine crate.
-export type GameErrorCode =
-  | "TooFewPlayers"
-  | "InvalidRoster"
-  | "UnknownPlayer"
-  | "PlayerNotAlive"
-  | "NotAWerewolf"
-  | "LastWolfCannotTargetSelf"
-  | "WrongPhase"
-  | "AlreadyActed"
-  | "VotingNotOpen"
-  | "VotingAlreadyOpen"
-  | "ActionsIncomplete"
-  | "GameOver"
-  | "Unknown";
+const GAME_ERROR_CODES = [
+  "TooFewPlayers",
+  "InvalidRoster",
+  "UnknownPlayer",
+  "PlayerNotAlive",
+  "NotAWerewolf",
+  "LastWolfCannotTargetSelf",
+  "WrongPhase",
+  "AlreadyActed",
+  "VotingNotOpen",
+  "VotingAlreadyOpen",
+  "ActionsIncomplete",
+  "GameOver",
+  "Unknown",
+] as const;
+
+export type GameErrorCode = typeof GAME_ERROR_CODES[number];
 
 // The addon throws `Error("<Code>: <message>")`; this splits it back apart.
 export class GameError extends Error {
@@ -44,17 +46,19 @@ export class GameError extends Error {
   }
 
   static fromThrown(thrown: unknown): GameError {
+    if (thrown instanceof GameError) return thrown;
     const raw = thrown instanceof Error ? thrown.message : String(thrown);
     const split = raw.indexOf(": ");
     if (split > 0) {
-      return new GameError(raw.slice(0, split) as GameErrorCode, raw.slice(split + 2));
+      const code = GAME_ERROR_CODES.find(code => code === raw.slice(0, split));
+      if (code) return new GameError(code, raw.slice(split + 2));
     }
     return new GameError("Unknown", raw);
   }
 }
 
 // Run an engine call, rethrowing any addon failure as a typed GameError.
-export function attempt<T>(call: () => T): T {
+function attempt<T>(call: () => T): T {
   try {
     return call();
   } catch (thrown) {
@@ -70,14 +74,79 @@ export type DayResolution =
   | { kind: "Eliminated"; eliminated: number }
   | { kind: "NoElimination" };
 
-export function normalizeNight(result: NightResult): NightResolution {
-  return result.kind === "Killed"
-    ? { kind: "Killed", killed: result.killed ?? 0 }
-    : { kind: "NoConsensus", targets: result.targets };
+function isSeat(value: unknown): value is number {
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
 }
 
-export function normalizeDay(result: DayResult): DayResolution {
-  return result.kind === "Eliminated"
-    ? { kind: "Eliminated", eliminated: result.eliminated ?? 0 }
-    : { kind: "NoElimination" };
+function normalizeNight(result: NightResult): NightResolution {
+  if (result?.kind === "Killed" && isSeat(result.killed)) {
+    return { kind: "Killed", killed: result.killed };
+  }
+  if (result?.kind === "NoConsensus" && Array.isArray(result.targets) && result.targets.every(isSeat)) {
+    return { kind: "NoConsensus", targets: result.targets };
+  }
+  throw new GameError("Unknown", "Invalid night resolution from native addon");
+}
+
+function normalizeDay(result: DayResult): DayResolution {
+  if (result?.kind === "Eliminated" && isSeat(result.eliminated)) {
+    return { kind: "Eliminated", eliminated: result.eliminated };
+  }
+  if (result?.kind === "NoElimination") return { kind: "NoElimination" };
+  throw new GameError("Unknown", "Invalid day resolution from native addon");
+}
+
+export class Game {
+  private inner: NativeGame;
+
+  constructor(playerCount: number) {
+    this.inner = attempt(() => new NativeGame(playerCount));
+  }
+
+  static withSeed(playerCount: number, seed: bigint): Game {
+    return Game.fromNative(attempt(() => NativeGame.withSeed(playerCount, seed)));
+  }
+
+  static withRoles(roles: Role[]): Game {
+    return Game.fromNative(attempt(() => NativeGame.withRoles(roles)));
+  }
+
+  // Wrap an existing native instance without constructing a second game or consuming randomness.
+  private static fromNative(inner: NativeGame): Game {
+    const game = Object.create(Game.prototype) as Game;
+    game.inner = inner;
+    return game;
+  }
+
+  nightAction(wolf: number, target: number): void {
+    attempt(() => this.inner.nightAction(wolf, target));
+  }
+
+  resolveNight(): NightResolution {
+    return normalizeNight(attempt(() => this.inner.resolveNight()));
+  }
+
+  readyToVote(player: number): void {
+    attempt(() => this.inner.readyToVote(player));
+  }
+
+  vote(voter: number, target: number): void {
+    attempt(() => this.inner.vote(voter, target));
+  }
+
+  resolveDay(): DayResolution {
+    return normalizeDay(attempt(() => this.inner.resolveDay()));
+  }
+
+  roleOf(id: number): Role {
+    return attempt(() => this.inner.roleOf(id));
+  }
+
+  isAlive(id: number): boolean {
+    return attempt(() => this.inner.isAlive(id));
+  }
+
+  state(): GameState {
+    return attempt(() => this.inner.state());
+  }
 }

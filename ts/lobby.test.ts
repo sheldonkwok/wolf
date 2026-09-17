@@ -4,7 +4,7 @@
 
 import { expect, test } from "bun:test";
 
-import { type Game, normalizeDay, normalizeNight } from "./engine.js";
+import { type Game } from "./engine.js";
 import { Lobby, LobbyError } from "./lobby.js";
 
 // ----- helpers -----------------------------------------------------------
@@ -37,12 +37,12 @@ function playOut(game: Game): void {
       const victim = s.players.find((p) => p.alive && p.role === "Villager")!.id;
       const wolves = s.players.filter((p) => p.alive && p.role === "Werewolf").map((p) => p.id);
       for (const wolf of wolves) game.nightAction(wolf, victim);
-      expect(normalizeNight(game.resolveNight()).kind).toBe("Killed");
+      expect(game.resolveNight().kind).toBe("Killed");
     } else {
       const living = s.players.filter((p) => p.alive).map((p) => p.id);
       for (const player of living.slice(0, s.readinessRequired)) game.readyToVote(player);
       for (const voter of living) game.vote(voter, voter);
-      expect(normalizeDay(game.resolveDay()).kind).toBe("NoElimination");
+      expect(game.resolveDay().kind).toBe("NoElimination");
     }
   }
   throw new Error("game did not end within the phase cap");

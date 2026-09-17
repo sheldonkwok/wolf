@@ -1,7 +1,7 @@
 // The pre-game roster: people join in order, the first is the host, and only the
 // host may start the engine the lobby then owns. Ported from the old Rust `wolf::Lobby`.
 
-import { attempt, Game } from "./engine.js";
+import { Game } from "./engine.js";
 
 // An opaque platform user handle, such as a Slack or Discord user id; the key that identifies a member.
 export type UserId = string;
@@ -73,14 +73,14 @@ export class Lobby {
   // Start a game with random roles, seeded from the clock; only the host may call this.
   start(host: UserId): Game {
     this.checkCanStart(host);
-    this.running = attempt(() => new Game(this.roster.length));
+    this.running = new Game(this.roster.length);
     return this.running;
   }
 
   // Like start, but the deal is drawn from `seed` so the game can be reproduced.
   startWithSeed(host: UserId, seed: bigint): Game {
     this.checkCanStart(host);
-    this.running = attempt(() => Game.withSeed(this.roster.length, seed));
+    this.running = Game.withSeed(this.roster.length, seed);
     return this.running;
   }
 

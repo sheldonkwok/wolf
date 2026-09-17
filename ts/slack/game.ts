@@ -1,4 +1,4 @@
-import { attempt, GameError, Rng, timeSeed } from "../engine.js";
+import { GameError, Rng, timeSeed } from "../engine.js";
 import { livingWolves, randomLivingVillager, villagerBotVote } from "../bots.js";
 import { Lobby, LobbyError } from "../lobby.js";
 
@@ -110,7 +110,7 @@ export class SlackGame {
     const game = this.lobby.game;
     const seat = this.lobby.seatOf(user);
     if (!game || seat === null) throw new CommandError("You are not in an active game.");
-    attempt(() => game.readyToVote(seat));
+    game.readyToVote(seat);
     this.readyBots();
     const state = game.state();
     this.dm(user, "You are ready to vote.");
@@ -139,8 +139,8 @@ export class SlackGame {
     const target = Number(targetText);
     if (!Number.isSafeInteger(target) || !this.lobby.memberAt(target)) throw new CommandError("Unknown target.");
     const state = game.state();
-    if (state.phase === "Night") attempt(() => game.nightAction(seat, target));
-    else if (state.phase === "Day" && state.votingOpen) attempt(() => game.vote(seat, target));
+    if (state.phase === "Night") game.nightAction(seat, target);
+    else if (state.phase === "Day" && state.votingOpen) game.vote(seat, target);
     else throw new CommandError("There is no choice to make right now.");
     this.dm(user, `Your ${state.phase === "Night" ? "night choice" : "vote"} for ${this.mention(target)} is recorded.`);
     this.advance();
@@ -161,14 +161,14 @@ export class SlackGame {
       if (state.pendingActors.length > 0) {
         if (state.phase === "Night") {
           const target = state.nightPicks[0]?.target ?? randomLivingVillager(state, this.rng);
-          for (const seat of state.pendingActors) attempt(() => game.nightAction(seat, target));
+          for (const seat of state.pendingActors) game.nightAction(seat, target);
         } else {
           const humanVote = state.votes.find(v => !this.isBot(v.voter))?.target ?? null;
           const wolfVote = state.votes.find(v => !this.isBot(v.voter) && game.roleOf(v.voter) === "Werewolf")?.target;
           const wolfTarget = wolfVote ?? randomLivingVillager(state, this.rng);
           for (const seat of state.pendingActors) {
             const target = game.roleOf(seat) === "Werewolf" ? wolfTarget : villagerBotVote(state, this.rng, humanVote, seat);
-            attempt(() => game.vote(seat, target));
+            game.vote(seat, target);
           }
         }
       }
@@ -181,7 +181,7 @@ export class SlackGame {
     for (const player of game.state().players) {
       if (game.state().votingOpen) break;
       if (player.alive && this.isBot(player.id) && !game.state().readyPlayers.includes(player.id)) {
-        attempt(() => game.readyToVote(player.id));
+        game.readyToVote(player.id);
       }
     }
   }
@@ -191,7 +191,7 @@ export class SlackGame {
     const state = game.state();
 
     if (state.phase === "Night") {
-      const result = attempt(() => game.resolveNight());
+      const result = game.resolveNight();
       this.prompt = crypto.randomUUID();
       if (result.kind === "NoConsensus") {
         for (const actor of game.state().pendingActors) {
@@ -200,11 +200,11 @@ export class SlackGame {
         this.promptActors();
         return false;
       }
-      this.elimination(result.killed!, "during the night");
+      this.elimination(result.killed, "during the night");
     } else {
-      const result = attempt(() => game.resolveDay());
+      const result = game.resolveDay();
       this.prompt = crypto.randomUUID();
-      if (result.kind === "Eliminated") this.elimination(result.eliminated!, "by the village");
+      if (result.kind === "Eliminated") this.elimination(result.eliminated, "by the village");
       else this.publish("The vote was tied. Nobody was eliminated.");
     }
     this.announcePhase();
