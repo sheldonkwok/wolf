@@ -77,7 +77,7 @@ export function messageBlocks(message: SlackMessage) {
 async function main(): Promise<void> {
   const args = slackArgs(process.argv.slice(2));
   if (args.help) {
-    console.log("Usage: bun run slackbot [--dev]\n\n--dev  Fill games to five players with bots; solo readiness opens voting.\n--help Show this help.");
+    console.log("Usage: bun run slackbot [--dev]\n\n--dev  Fill games to five players with bots; vote in the channel by mention or bot player number.\n--help Show this help.");
     return;
   }
   const config = slackConfig(process.env);

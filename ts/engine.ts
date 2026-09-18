@@ -29,8 +29,7 @@ const GAME_ERROR_CODES = [
   "LastWolfCannotTargetSelf",
   "WrongPhase",
   "AlreadyActed",
-  "VotingNotOpen",
-  "VotingAlreadyOpen",
+  "NoMajority",
   "ActionsIncomplete",
   "GameOver",
   "Unknown",
@@ -75,8 +74,7 @@ export type NightResolution =
   | { kind: "NoConsensus"; targets: number[] };
 
 export type DayResolution =
-  | { kind: "Eliminated"; eliminated: number }
-  | { kind: "NoElimination" };
+  { kind: "Eliminated"; eliminated: number };
 
 function isSeat(value: unknown): value is number {
   return typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
@@ -99,7 +97,6 @@ function normalizeDay(result: DayResult): DayResolution {
   if (result?.kind === "Eliminated" && isSeat(result.eliminated)) {
     return { kind: "Eliminated", eliminated: result.eliminated };
   }
-  if (result?.kind === "NoElimination") return { kind: "NoElimination" };
   throw new GameError("Unknown", "Invalid day resolution from native addon");
 }
 
@@ -139,10 +136,6 @@ export class Game {
 
   resolveNight(): NightResolution {
     return normalizeNight(attempt(() => this.inner.resolveNight()));
-  }
-
-  readyToVote(player: number): void {
-    attempt(() => this.inner.readyToVote(player));
   }
 
   vote(voter: number, target: number): void {

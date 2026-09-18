@@ -20,7 +20,7 @@ export type SlackInput = {
   channel: string;
 } & ({ kind: "mention" | "dm"; text: string } | { kind: "choice"; value: string });
 
-const HELP = "In the game channel: `@werewolf join`, `leave`, `start`, `status`, `vote`, `ready`, or `help`. The first player is host; only the host starts games. Tell me `ready to vote` in the game channel or a DM when you are ready. More than half of the living players must be ready to open elimination voting. Use the buttons in my DMs for secret choices. DM `status` to get your role and current prompt again.";
+const HELP = "In the game channel: `@werewolf join`, `leave`, `start`, `status`, `vote @player`, or `help`. The first player is host; only the host starts games. During the day, vote publicly with `@werewolf vote @player`. More than half of the living players must vote for the same player to eliminate them and begin night. Repeat the command to change your vote before a majority is reached. Use DM buttons for night actions. DM `status` to get your role and current night prompt again.";
 
 export class SlackGame {
   private readonly seen = new Set<string>();
@@ -45,11 +45,11 @@ export class SlackGame {
     try {
       if (input.kind === "choice") this.choose(input.user, input.value);
       else if (input.kind === "dm") {
-        const command = input.text.trim().toLowerCase();
-        if (["vote", "ready", "ready to vote"].includes(command)) this.readyToVote(input.user);
-        else this.privateStatus(input.user);
+        if (/^(vote|ready)\b/i.test(input.text.trim())) {
+          this.dm(input.user, `Vote in <#${this.channel}> with \`@werewolf vote @player\`.`);
+        } else this.privateStatus(input.user);
       }
-      else this.command(input.user, input.text.trim().toLowerCase());
+      else this.command(input.user, input.text.trim());
     } catch (error) {
       if (!(error instanceof LobbyError || error instanceof GameError || error instanceof CommandError)) throw error;
       this.messages.push({
@@ -62,7 +62,11 @@ export class SlackGame {
   }
 
   private command(user: string, command: string): void {
-    switch (command) {
+    if (/^vote\b/i.test(command)) {
+      this.publicVote(user, command);
+      return;
+    }
+    switch (command.toLowerCase()) {
       case "join":
         this.lobby.join(user, user);
         this.publish(`<@${user}> joined. ${this.roster()}`);
@@ -89,11 +93,6 @@ export class SlackGame {
         this.advance();
         break;
       }
-      case "vote":
-      case "ready":
-      case "ready to vote":
-        this.readyToVote(user);
-        break;
       case "status":
         this.publish(this.status());
         break;
@@ -106,26 +105,24 @@ export class SlackGame {
     }
   }
 
-  private readyToVote(user: string): void {
+  private publicVote(user: string, command: string): void {
     const game = this.lobby.game;
     const seat = this.lobby.seatOf(user);
     if (!game || seat === null) throw new CommandError("You are not in an active game.");
-    game.readyToVote(seat);
-    this.readyBots();
-    const state = game.state();
-    this.dm(user, "You are ready to vote.");
-    if (!state.votingOpen) {
-      this.publish(`${state.readyPlayers.length}/${state.readinessRequired} players ready to open elimination voting. Use \`@werewolf ready\` or DM \`ready\` when you are ready.`);
-      return;
-    }
-    this.openVoting();
-    this.advance();
+    const mention = /^vote\s+<@([A-Z0-9]+)(?:\|[^>]+)?>$/i.exec(command);
+    const botSeat = this.dev ? /^vote\s+(\d+)$/i.exec(command) : null;
+    const target = mention ? this.lobby.seatOf(mention[1]!) : botSeat ? Number(botSeat[1]) - 1 : null;
+    if (!mention && !botSeat) throw new CommandError("Use `@werewolf vote @player` to mention one player.");
+    if (target === null || !Number.isSafeInteger(target) || !this.lobby.memberAt(target)) throw new CommandError("Unknown target. Mention a player in this game.");
+    game.vote(seat, target);
+    this.announceVote(seat, target);
+    this.advance(target);
   }
 
-  private openVoting(): void {
-    this.prompt = crypto.randomUUID();
-    this.publish("Voting is open. Living players: choose a player using the buttons in my DM. Votes are final.");
-    this.promptActors();
+  private announceVote(seat: number, target: number): void {
+    const state = this.lobby.game!.state();
+    const count = state.votes.filter(v => v.target === target).length;
+    this.publish(`${this.mention(seat)} voted for ${this.mention(target)} (${count}/${state.majorityRequired} votes needed).`);
   }
 
   private choose(user: string, value: string): void {
@@ -150,55 +147,42 @@ export class SlackGame {
         default: game.nightAction(seat, target);
       }
     }
-    else if (state.phase === "Day" && state.votingOpen) game.vote(seat, target);
     else throw new CommandError("There is no choice to make right now.");
-    this.dm(user, `Your ${state.phase === "Night" ? "night choice" : "vote"} for ${this.mention(target)} is recorded.`);
+    this.dm(user, `Your night choice for ${this.mention(target)} is recorded.`);
     this.advance();
   }
 
-  private advance(): void {
+  private advance(humanVote: number | null = null): void {
     while (this.lobby.game) {
       const game = this.lobby.game;
-      let state = game.state();
-      if (state.phase === "Day" && !state.votingOpen) {
-        if (state.players.some(p => p.alive && !this.isBot(p.id))) return;
-        this.readyBots();
-        if (!game.state().votingOpen) return;
-        this.openVoting();
-        state = game.state();
-      }
-      if (state.pendingActors.some(seat => !this.isBot(seat))) return;
-      if (state.pendingActors.length > 0) {
-        if (state.phase === "Night") {
-          const target = state.nightPicks[0]?.target ?? randomLivingVillager(state, this.rng);
-          for (const seat of state.pendingActors) {
-            switch (game.roleOf(seat)) {
-              case "Doctor": game.doctorAction(seat, pick(this.rng, livingIds(state))); break;
-              case "Seer": game.seerAction(seat, randomLivingOther(state, this.rng, seat)); break;
-              default: game.nightAction(seat, target);
-            }
-          }
-        } else {
-          const humanVote = state.votes.find(v => !this.isBot(v.voter))?.target ?? null;
+      const state = game.state();
+      if (state.phase === "Day") {
+        if (state.majorityTarget == null) {
+          const humansAlive = state.players.some(p => p.alive && !this.isBot(p.id));
+          if (humansAlive && humanVote === null) return;
           const wolfVote = state.votes.find(v => !this.isBot(v.voter) && game.roleOf(v.voter) === "Werewolf")?.target;
           const wolfTarget = wolfVote ?? randomLivingVillager(state, this.rng);
-          for (const seat of state.pendingActors) {
-            const target = game.roleOf(seat) === "Werewolf" ? wolfTarget : villagerBotVote(state, this.rng, humanVote, seat);
-            game.vote(seat, target);
+          for (const player of state.players.filter(p => p.alive && this.isBot(p.id))) {
+            const target = !humansAlive || player.role === "Werewolf" ? wolfTarget : villagerBotVote(state, this.rng, humanVote, player.id);
+            game.vote(player.id, target);
+            this.announceVote(player.id, target);
+            if (game.state().majorityTarget != null) break;
+          }
+          if (game.state().majorityTarget == null) return;
+        }
+      } else {
+        if (state.pendingActors.some(seat => !this.isBot(seat))) return;
+        const target = state.nightPicks[0]?.target ?? randomLivingVillager(state, this.rng);
+        for (const seat of state.pendingActors) {
+          switch (game.roleOf(seat)) {
+            case "Doctor": game.doctorAction(seat, pick(this.rng, livingIds(state))); break;
+            case "Seer": game.seerAction(seat, randomLivingOther(state, this.rng, seat)); break;
+            default: game.nightAction(seat, target);
           }
         }
       }
       if (!this.resolvePhase()) return;
-    }
-  }
-
-  private readyBots(): void {
-    const game = this.lobby.game!;
-    for (const player of game.state().players) {
-      if (game.state().votingOpen) break;
-      if (player.alive && this.isBot(player.id) && !game.state().readyPlayers.includes(player.id)) {
-        game.readyToVote(player.id);
-      }
+      humanVote = null;
     }
   }
 
@@ -221,8 +205,7 @@ export class SlackGame {
     } else {
       const result = game.resolveDay();
       this.prompt = crypto.randomUUID();
-      if (result.kind === "Eliminated") this.elimination(result.eliminated, "by the village");
-      else this.publish("The vote was tied. Nobody was eliminated.");
+      this.elimination(result.eliminated, "by the village");
     }
     this.announcePhase();
     return true;
@@ -242,7 +225,7 @@ export class SlackGame {
       this.publish(`Night ${state.round}. The village sleeps. Players with night actions, check your DMs.`);
       this.promptActors();
     } else {
-      this.publish(`Day ${state.round}. Discuss in <#${this.channel}>. Use \`@werewolf ready\` or DM \`ready to vote\` when you are ready. Elimination voting opens when more than half of the living players are ready (${state.readinessRequired} needed).${this.dev ? " Dev bots add their readiness when a human is ready; one human is enough in a solo game." : ""}\n${this.livingRoster()}`);
+      this.publish(`Day ${state.round}. Discuss in <#${this.channel}> and vote with \`@werewolf vote @player\`. A player is eliminated as soon as ${state.majorityRequired} living players vote for them. You can change your vote until then.${this.dev ? " To target a dev bot, use its player number: @werewolf vote 3." : ""}\n${this.livingRoster()}`);
     }
   }
 
@@ -254,11 +237,10 @@ export class SlackGame {
     if (this.bots.has(user)) return;
     const state = this.lobby.game!.state();
     const seat = this.lobby.seatOf(user)!;
-    if (!state.pendingActors.includes(seat) || (state.phase === "Day" && !state.votingOpen)) return;
+    if (state.phase !== "Night" || !state.pendingActors.includes(seat)) return;
     const role = this.lobby.game!.roleOf(seat);
-    const excludeSelf = state.phase === "Night" && role === "Werewolf" && livingWolves(state).length === 1;
-    const instruction = state.phase !== "Night" ? "choose who to eliminate. Your vote is final"
-      : role === "Doctor" ? "choose someone to protect, including yourself. Your choice is final"
+    const excludeSelf = role === "Werewolf" && livingWolves(state).length === 1;
+    const instruction = role === "Doctor" ? "choose someone to protect, including yourself. Your choice is final"
       : role === "Seer" ? "choose someone to inspect. Only you will receive the result. Your choice is final"
       : "choose the pack's target. All wolves must agree";
     this.messages.push({
@@ -301,7 +283,8 @@ export class SlackGame {
   private status(): string {
     const state = this.lobby.game?.state();
     if (!state) return this.roster();
-    return `${state.phase} ${state.round}${state.phase === "Day" ? state.votingOpen ? " — voting open" : ` — discussion (${state.readyPlayers.length}/${state.readinessRequired} ready to open voting)` : ""}.\n${this.livingRoster()}`;
+    const votes = state.phase === "Day" ? `\nVotes (${state.majorityRequired} needed): ${state.votes.length ? state.votes.map(v => `${this.mention(v.voter)} → ${this.mention(v.target)}`).join(", ") : "none"}. Vote with \`@werewolf vote @player\`.` : "";
+    return `${state.phase} ${state.round}.\n${this.livingRoster()}${votes}`;
   }
 
   private roster(): string {
@@ -320,7 +303,7 @@ export class SlackGame {
   private user(seat: number): string { return this.lobby.memberAt(seat)!.user; }
   private isBot(seat: number): boolean { return this.bots.has(this.user(seat)); }
   private mention(seat: number): string { return this.isBot(seat) ? this.lobby.memberAt(seat)!.name : `<@${this.user(seat)}>`; }
-  private help(): string { return `${HELP}${this.dev ? " Dev mode: start with one human; bots fill to five players and act automatically. Your readiness is enough to open voting in a solo game." : ""}`; }
+  private help(): string { return `${HELP}${this.dev ? " Dev mode: start with one human; bots fill to five players and act automatically. Use `@werewolf vote 3` to target a dev bot by player number." : ""}`; }
   private publish(text: string): void { this.messages.push({ destination: "channel", text }); }
   private dm(user: string, text: string): void { if (!this.bots.has(user)) this.messages.push({ destination: "dm", user, text }); }
 }

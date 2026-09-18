@@ -27,7 +27,7 @@ function grab(call: () => unknown): LobbyError {
   throw new Error("expected the call to throw");
 }
 
-// Drive a running game to its end with an agreeing pack and a self-voting town.
+// Drive a running game to its end with an agreeing pack and town.
 function playOut(game: Game): void {
   const cap = game.state().players.length * 2 + 4;
   for (let i = 0; i < cap; i++) {
@@ -44,9 +44,9 @@ function playOut(game: Game): void {
       expect(game.resolveNight().kind).toBe("Killed");
     } else {
       const living = s.players.filter((p) => p.alive).map((p) => p.id);
-      for (const player of living.slice(0, s.readinessRequired)) game.readyToVote(player);
-      for (const voter of living) game.vote(voter, voter);
-      expect(game.resolveDay().kind).toBe("NoElimination");
+      const target = s.players.find(p => p.alive && p.role === "Werewolf")!.id;
+      for (const voter of living) game.vote(voter, target);
+      expect(game.resolveDay().kind).toBe("Eliminated");
     }
   }
   throw new Error("game did not end within the phase cap");

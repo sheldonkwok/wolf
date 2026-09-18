@@ -39,12 +39,13 @@ After roles are assigned privately, the game starts with **Day 1**, with everyon
 2. **Later Mornings:** The Moderator announces what happened during the preceding night:
    * *If saved:* "The Werewolves attacked Alex, but the Doctor saved them! No one was eliminated."
    * *If not saved:* "Sadly, Jamie was eliminated by the Werewolves!" *(Jamie silently shows their card and becomes a quiet spectator).*
-3. **Town Discussion:** Players discuss who seems suspicious, who might be lying, or what clues were spotted. Each living player tells the bot when they are ready to vote. Elimination voting opens once **more than half of the living players** are ready (for example, 4 of 7 or 4 of 6). Each player counts once, and readiness resets each day, including Day 1.
+3. **Town Discussion:** Players discuss who seems suspicious, who might be lying, or what clues were spotted. Voting is available throughout the day, including Day 1.
 4. **The Vote:**
-   * Players count down: *"3, 2, 1... Point!"*
-   * Everyone points to the person they suspect most.
-   * The player with the most votes is eliminated and reveals their role card. If the lead is tied, nobody is eliminated.
-   * If neither team has won, night begins with the same round number.
+   * In the game channel, a living player votes with **`@werewolf vote @player`**, mentioning the player they suspect.
+   * Each living player has one vote. Repeating the command with a different target changes that vote until a majority is reached.
+   * As soon as **more than half of the living players** vote for the same player (for example, 4 of 7 or 4 of 6), that player is eliminated and their role is revealed. There is no need to wait for everyone to vote.
+   * A split vote keeps the day open for discussion and vote changes. Votes reset each day.
+   * If neither team has won, night begins immediately with the same round number.
 
 ---
 

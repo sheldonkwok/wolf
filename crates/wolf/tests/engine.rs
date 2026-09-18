@@ -71,16 +71,10 @@ fn assert_winner_matches_survivors(g: &Engine) {
     }
 }
 
-/// Play one whole game to its end: the pack always agrees on a random target;
-/// the town votes randomly, or unanimously for one random target when `unanimous_town`.
+/// Play a whole game with random initial votes or a unanimous town.
 fn play_out(g: &mut Engine, rng: &mut Rng, unanimous_town: bool) {
     // A unanimous pack kills one player every night, so `players` phases is a hard ceiling.
     for _ in 0..(g.players().len() * 2 + 4) {
-        if g.phase() == Phase::Day {
-            for player in living_ids(g).into_iter().take(g.readiness_required()) {
-                g.ready_to_vote(player).expect("ready");
-            }
-        }
         match g.phase() {
             Phase::Night => {
                 let wolves = living_wolf_ids(g);
@@ -115,6 +109,12 @@ fn play_out(g: &mut Engine, rng: &mut Rng, unanimous_town: bool) {
                     let target = rng.pick(&living);
                     g.vote(*voter, target).expect("vote");
                 }
+                if g.majority_target().is_none() {
+                    let agreed = rng.pick(&living);
+                    for voter in living.iter().take(g.majority_required()) {
+                        g.vote(*voter, agreed).expect("change vote");
+                    }
+                }
                 g.resolve_day().expect("day resolves");
             }
             Phase::Ended => {
@@ -126,7 +126,7 @@ fn play_out(g: &mut Engine, rng: &mut Rng, unanimous_town: bool) {
     panic!("game did not end within the phase cap");
 }
 
-/// The pack agrees; the town votes at random, so most days tie and eliminate nobody.
+/// The town starts with random votes and changes votes until a majority agrees.
 #[test]
 fn random_town_games_always_end_with_a_consistent_winner() {
     let mut seen_villagers = false;

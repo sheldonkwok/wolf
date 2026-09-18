@@ -12,9 +12,9 @@ import {
 
 function reachNight(game: Game): void {
   const players = game.state().players.filter(p => p.alive);
-  for (const player of players.slice(0, game.state().readinessRequired)) game.readyToVote(player.id);
-  for (const player of players) game.vote(player.id, player.id);
-  expect(game.resolveDay().kind).toBe("NoElimination");
+  const target = players.findLast(p => p.role === "Villager")!.id;
+  for (const player of players) game.vote(player.id, target);
+  expect(game.resolveDay()).toEqual({ kind: "Eliminated", eliminated: target });
   expect(game.state().phase).toBe("Night");
   expect(game.state().round).toBe(1);
 }
@@ -27,8 +27,8 @@ test("withSeed is reproducible and matches the Rust deal", () => {
   expect(a.phase).toBe("Day");
   expect(a.round).toBe(1);
   expect(a.players.every(p => p.alive)).toBe(true);
-  expect(a.votingOpen).toBe(false);
-  expect(a.readyPlayers).toEqual([]);
+  expect(a.majorityRequired).toBe(4);
+  expect(a.majorityTarget).toBeUndefined();
   expect(a.pendingActors).toEqual(a.players.map(p => p.id));
   expect(a.players.filter((p) => p.role === "Werewolf").map((p) => p.id)).toEqual([5]);
 });
@@ -44,17 +44,15 @@ test("timeSeed returns a u64-range bigint", () => {
   expect(s).toBeGreaterThanOrEqual(0n);
 });
 
-test("Day 1 gates voting and can end in a villager win before night", () => {
+test("Day 1 accepts votes and can end in a villager win before night", () => {
   const game = Game.withRoles(["Werewolf", "Villager", "Villager", "Villager", "Villager"]);
   expect(game.state().phase).toBe("Day");
   const before = game.state();
   expect(grab(() => game.nightAction(0, 1)).code).toBe("WrongPhase");
   expect(grab(() => game.resolveNight()).code).toBe("WrongPhase");
-  expect(grab(() => game.vote(0, 1)).code).toBe("VotingNotOpen");
-  expect(grab(() => game.resolveDay()).code).toBe("VotingNotOpen");
+  expect(grab(() => game.resolveDay()).code).toBe("NoMajority");
   expect(game.state()).toEqual(before);
 
-  for (const player of [0, 1, 2]) game.readyToVote(player);
   for (const voter of [0, 1, 2, 3, 4]) game.vote(voter, voter === 0 ? 2 : 0);
   const day = game.resolveDay();
   expect(day).toEqual({ kind: "Eliminated", eliminated: 0 });
@@ -67,7 +65,7 @@ test("Day 1 gates voting and can end in a villager win before night", () => {
 });
 
 test("a split pack resolves to NoConsensus and stays in Night", () => {
-  const game = Game.withRoles(["Werewolf", "Werewolf", "Villager", "Villager", "Villager"]);
+  const game = Game.withRoles(["Werewolf", "Werewolf", "Villager", "Villager", "Villager", "Villager"]);
   reachNight(game);
   game.nightAction(0, 2);
   game.nightAction(1, 3);
@@ -87,36 +85,26 @@ test("a lone wolf cannot target itself and a rejected pick leaves state unchange
   expect(game.resolveNight()).toEqual({ kind: "Killed", killed: 1 });
 });
 
-test("readiness crosses the binding, gates votes, and clears after resolution", () => {
-  const game = Game.withRoles(["Werewolf", "Villager", "Villager", "Villager", "Villager"]);
-  reachNight(game);
-  expect(grab(() => game.readyToVote(0)).code).toBe("WrongPhase");
+test("majority crosses the binding and votes clear after resolution", () => {
+  const game = Game.withRoles(["Werewolf", "Villager", "Villager", "Villager", "Villager", "Villager", "Villager"]);
+  expect(game.state().majorityRequired).toBe(4);
+  for (const voter of [0, 1, 2]) game.vote(voter, 6);
+  const before = game.state();
+  expect(grab(() => game.resolveDay()).code).toBe("NoMajority");
+  expect(game.state()).toEqual(before);
+  game.vote(3, 6);
+  expect(game.state().majorityTarget).toBe(6);
+  expect(game.state().pendingActors).toEqual([4, 5, 6]);
+  expect(game.resolveDay()).toEqual({ kind: "Eliminated", eliminated: 6 });
+  expect(game.state().votes).toEqual([]);
+  expect(game.state().majorityTarget).toBeUndefined();
+  expect(grab(() => game.vote(0, 1)).code).toBe("WrongPhase");
   game.nightAction(0, 1);
   game.resolveNight();
-  expect(game.state().readinessRequired).toBe(3);
-  expect(grab(() => game.readyToVote(1)).code).toBe("PlayerNotAlive");
-  expect(grab(() => game.readyToVote(99)).code).toBe("UnknownPlayer");
-  game.readyToVote(0);
-  expect(grab(() => game.readyToVote(0)).code).toBe("AlreadyActed");
-  game.readyToVote(2);
-  expect(game.state().readyPlayers).toEqual([0, 2]);
-  expect(game.state().votingOpen).toBe(false);
-  expect(game.state().pendingActors).toEqual([3, 4]);
-  expect(grab(() => game.vote(3, 0)).code).toBe("VotingNotOpen");
-  expect(grab(() => game.resolveDay()).code).toBe("VotingNotOpen");
-  game.readyToVote(3);
-  expect(game.state().votingOpen).toBe(true);
-  expect(game.state().phase).toBe("Day");
-  expect(game.state().pendingActors).toEqual([0, 2, 3, 4]);
-  expect(grab(() => game.readyToVote(4)).code).toBe("VotingAlreadyOpen");
-  for (const player of [0, 2, 3, 4]) game.vote(player, player);
-  game.resolveDay();
-  expect(game.state().readyPlayers).toEqual([]);
-  expect(game.state().votingOpen).toBe(false);
-  game.nightAction(0, 2);
-  game.resolveNight();
-  expect(game.state().readinessRequired).toBe(2);
-  expect(game.state().votingOpen).toBe(false);
+  expect(game.state().majorityRequired).toBe(3);
+  expect(grab(() => game.vote(1, 0)).code).toBe("PlayerNotAlive");
+  expect(grab(() => game.vote(0, 6)).code).toBe("PlayerNotAlive");
+  expect(grab(() => game.vote(99, 0)).code).toBe("UnknownPlayer");
 });
 
 test("unknown player throws UnknownPlayer", () => {
@@ -133,14 +121,13 @@ test("a day command during Night throws WrongPhase", () => {
   expect(err.code).toBe("WrongPhase");
 });
 
-test("voting twice throws AlreadyActed", () => {
+test("votes can be changed and repeated without counting twice", () => {
   const game = Game.withRoles(["Werewolf", "Villager", "Villager", "Villager", "Villager"]);
-  reachNight(game);
-  game.nightAction(0, 1);
-  game.resolveNight();
-  for (const player of [0, 2, 3]) game.readyToVote(player);
   game.vote(2, 0);
-  expect(grab(() => game.vote(2, 3)).code).toBe("AlreadyActed");
+  game.vote(2, 0);
+  game.vote(2, 3);
+  expect(game.state().votes).toEqual([{ voter: 2, target: 3 }]);
+  expect(grab(() => game.resolveDay()).code).toBe("NoMajority");
 });
 
 test("resolving the night early throws ActionsIncomplete", () => {
@@ -174,10 +161,9 @@ test("invalid rosters, non-wolf actions, and commands after game over throw type
   expect(grab(() => game.nightAction(1, 2)).code).toBe("NotAWerewolf");
   game.nightAction(0, 1);
   game.resolveNight();
-  for (const id of [0, 2, 3]) game.readyToVote(id);
-  for (const id of [0, 2, 3, 4]) game.vote(id, 0);
+  for (const id of [0, 2, 3]) game.vote(id, 0);
   expect(game.resolveDay()).toEqual({ kind: "Eliminated", eliminated: 0 });
-  expect(grab(() => game.readyToVote(2)).code).toBe("GameOver");
+  expect(grab(() => game.vote(2, 0)).code).toBe("GameOver");
 });
 
 test("night resolution preserves seat zero", () => {
@@ -263,6 +249,6 @@ test("special roles cross the binding with final actions, private results, and a
   expect(grab(() => game.doctorAction(0, 3)).code).toBe("AlreadyActed");
   expect(game.resolveNight()).toEqual({ kind: "Saved", saved: 0 });
   expect(game.state().doctorPicks).toEqual([]);
-  expect(game.state().players.every(p => p.alive)).toBe(true);
+  expect(game.state().players.filter(p => p.alive).length).toBe(4);
   expect(game.state().round).toBe(2);
 });

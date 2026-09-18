@@ -23,12 +23,10 @@ pub enum GameError {
     LastWolfCannotTargetSelf,
     /// The command is not legal in the current phase.
     WrongPhase { expected: Phase, actual: Phase },
-    /// This player already signaled readiness or cast their final day vote.
+    /// This player already used their final night action.
     AlreadyActed(PlayerId),
-    /// Elimination voting requires a strict majority of living players to be ready.
-    VotingNotOpen,
-    /// The readiness threshold has already been reached this day.
-    VotingAlreadyOpen,
+    /// No target has votes from more than half of the living players.
+    NoMajority,
     /// Resolution was attempted before every required actor had acted.
     ActionsIncomplete { waiting_on: Vec<PlayerId> },
     /// The game is over; no further commands are accepted.
@@ -49,8 +47,7 @@ impl GameError {
             GameError::LastWolfCannotTargetSelf => "LastWolfCannotTargetSelf",
             GameError::WrongPhase { .. } => "WrongPhase",
             GameError::AlreadyActed(_) => "AlreadyActed",
-            GameError::VotingNotOpen => "VotingNotOpen",
-            GameError::VotingAlreadyOpen => "VotingAlreadyOpen",
+            GameError::NoMajority => "NoMajority",
             GameError::ActionsIncomplete { .. } => "ActionsIncomplete",
             GameError::GameOver => "GameOver",
         }
@@ -82,11 +79,10 @@ impl fmt::Display for GameError {
                 )
             }
             GameError::AlreadyActed(id) => write!(f, "player {id} has already acted this phase"),
-            GameError::VotingNotOpen => write!(
+            GameError::NoMajority => write!(
                 f,
-                "voting opens when more than half of the living players are ready"
+                "more than half of the living players must vote for the same target"
             ),
-            GameError::VotingAlreadyOpen => write!(f, "voting is already open"),
             GameError::ActionsIncomplete { waiting_on } => {
                 write!(f, "still waiting on {waiting_on:?}")
             }

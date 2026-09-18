@@ -12,11 +12,8 @@
 //! ];
 //! let mut game = Engine::with_roles(&roles).unwrap();
 //!
-//! // Day 1: a majority is ready, then everyone votes to lynch wolf P0.
-//! for player in [0, 1, 2, 3] {
-//!     game.ready_to_vote(game.player(player)).unwrap();
-//! }
-//! for voter in 0..7 {
+//! // Day 1: four of seven living players vote to eliminate wolf P0.
+//! for voter in 0..4 {
 //!     game.vote(game.player(voter), game.player(0)).unwrap();
 //! }
 //! game.resolve_day().unwrap();

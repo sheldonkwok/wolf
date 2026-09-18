@@ -7,10 +7,10 @@ use Role::{Villager as V, Werewolf as W};
 // helpers
 // ---------------------------------------------------------------------------
 
-/// Reach Night 1 through a tied opening vote, preserving the exact roster.
+/// Isolate night-action tests with a living roster at Night 1.
 fn night_game(roles: &[Role]) -> Engine {
     let mut g = Engine::with_roles(roles).expect("roster should be valid");
-    assert_eq!(town_ties(&mut g), DayOutcome::NoElimination);
+    g.phase = Phase::Night;
     g
 }
 
@@ -41,18 +41,8 @@ fn wolves_kill(g: &mut Engine, target: PlayerId) -> NightOutcome {
 
 /// Every living player votes for `target`, then the day is resolved.
 fn town_lynches(g: &mut Engine, target: PlayerId) -> DayOutcome {
-    open_voting(g);
     for voter in living_ids(g) {
         g.vote(voter, target).expect("vote");
-    }
-    g.resolve_day().expect("day should resolve")
-}
-
-/// Every living player votes for themselves, guaranteeing a tie for the lead.
-fn town_ties(g: &mut Engine) -> DayOutcome {
-    open_voting(g);
-    for voter in living_ids(g) {
-        g.vote(voter, voter).expect("self vote");
     }
     g.resolve_day().expect("day should resolve")
 }
@@ -62,89 +52,50 @@ fn no_ids() -> Vec<PlayerId> {
 }
 
 #[test]
-fn readiness_requires_a_strict_living_majority_and_resets_each_day() {
+fn majority_eliminates_before_everyone_votes_and_resets_each_day() {
     for count in [5, 6, 8] {
         let mut roles = vec![V; count];
         roles[0] = W;
-        let mut g = night_game(&roles);
-        wolves_kill(&mut g, p(1));
-        let living = living_ids(&g);
-        let required = living.len() / 2 + 1;
-        assert_eq!(g.readiness_required(), required);
-        for (index, &player) in living.iter().take(required).enumerate() {
-            assert!(!g.voting_open());
-            let before = g.clone();
-            assert_eq!(g.vote(p(0), p(2)), Err(GameError::VotingNotOpen));
-            assert_eq!(g.resolve_day(), Err(GameError::VotingNotOpen));
-            assert_eq!(g, before);
-            g.ready_to_vote(player).unwrap();
-            assert_eq!(g.ready_players().len(), index + 1);
-            assert_eq!(g.voting_open(), index + 1 == required);
-            if !g.voting_open() {
-                assert!(!g.pending_actors().contains(&player));
-            }
+        let mut g = Engine::with_roles(&roles).unwrap();
+        let required = count / 2 + 1;
+        assert_eq!(g.majority_required(), required);
+        for voter in 0..required - 1 {
+            g.vote(p(voter), p(count - 1)).unwrap();
         }
+        let before = g.clone();
+        assert_eq!(g.resolve_day(), Err(GameError::NoMajority));
+        assert_eq!(g, before);
+        assert_eq!(g.majority_target(), None);
+        g.vote(p(required - 1), p(count - 1)).unwrap();
+        assert_eq!(g.majority_target(), Some(p(count - 1)));
+        assert!(!g.pending_actors().is_empty());
+        assert_eq!(g.resolve_day(), Ok(DayOutcome::Eliminated(p(count - 1))));
+        assert_eq!(g.phase(), Phase::Night);
+        assert_eq!(g.round(), 1);
+        assert!(g.current_votes().is_empty());
+        assert_eq!(g.majority_target(), None);
+        wolves_kill(&mut g, p(1));
         assert_eq!(g.phase(), Phase::Day);
         assert_eq!(g.round(), 2);
-        assert_eq!(living_ids(&g), living);
-        assert_eq!(g.pending_actors(), living);
-        assert!(g.current_votes().is_empty());
-        let before = g.clone();
-        assert_eq!(g.ready_to_vote(p(0)), Err(GameError::VotingAlreadyOpen));
-        assert_eq!(g, before);
-        assert_eq!(town_ties(&mut g), DayOutcome::NoElimination);
-        assert_eq!(g.phase(), Phase::Night);
-        assert!(!g.voting_open());
-        assert!(g.ready_players().is_empty());
-        wolves_kill(&mut g, p(2));
-        assert_eq!(g.phase(), Phase::Day);
-        assert_eq!(g.readiness_required(), g.alive().count() / 2 + 1);
-        assert!(!g.voting_open());
-        assert!(g.ready_players().is_empty());
+        assert_eq!(g.majority_required(), (count - 2) / 2 + 1);
         assert_eq!(g.pending_actors(), living_ids(&g));
     }
 }
 
 #[test]
-fn invalid_readiness_commands_leave_state_unchanged() {
+fn invalid_votes_leave_state_unchanged() {
     let mut g = night_game(&[W, V, V, V, V]);
-    let before = g.clone();
-    assert_eq!(
-        g.ready_to_vote(p(0)),
-        Err(GameError::WrongPhase {
-            expected: Phase::Day,
-            actual: Phase::Night,
-        })
-    );
-    assert_eq!(g, before);
     wolves_kill(&mut g, p(1));
-    for (player, error) in [
-        (p(99), GameError::UnknownPlayer(p(99))),
-        (p(1), GameError::PlayerNotAlive(p(1))),
+    g.vote(p(2), p(0)).unwrap();
+    for (voter, target, error) in [
+        (p(99), p(0), GameError::UnknownPlayer(p(99))),
+        (p(2), p(99), GameError::UnknownPlayer(p(99))),
+        (p(1), p(0), GameError::PlayerNotAlive(p(1))),
+        (p(2), p(1), GameError::PlayerNotAlive(p(1))),
     ] {
         let before = g.clone();
-        assert_eq!(g.ready_to_vote(player), Err(error));
+        assert_eq!(g.vote(voter, target), Err(error));
         assert_eq!(g, before);
-    }
-    g.ready_to_vote(p(2)).unwrap();
-    let before = g.clone();
-    assert_eq!(g.ready_to_vote(p(2)), Err(GameError::AlreadyActed(p(2))));
-    assert_eq!(g, before);
-    town_lynches(&mut g, p(0));
-    let before = g.clone();
-    assert_eq!(g.ready_to_vote(p(3)), Err(GameError::GameOver));
-    assert_eq!(g, before);
-    assert!(g.ready_players().is_empty());
-}
-
-fn open_voting(g: &mut Engine) {
-    for player in living_ids(g) {
-        if g.voting_open() {
-            break;
-        }
-        if !g.ready_players().contains(&player) {
-            g.ready_to_vote(player).unwrap();
-        }
     }
 }
 
@@ -291,16 +242,14 @@ fn dead_players_cannot_act_or_be_targeted() {
 }
 
 #[test]
-fn a_day_vote_cannot_be_changed_once_cast() {
-    let mut g = night_game(&[W, W, V, V, V, V]);
-    wolves_kill(&mut g, p(2));
-    open_voting(&mut g);
-
+fn a_day_vote_can_change_without_counting_twice() {
+    let mut g = Engine::with_roles(&[W, V, V, V, V]).unwrap();
     g.vote(p(1), p(0)).unwrap();
-    assert_eq!(
-        g.vote(p(1), p(3)).unwrap_err(),
-        GameError::AlreadyActed(p(1))
-    );
+    g.vote(p(1), p(0)).unwrap();
+    assert_eq!(g.current_votes().len(), 1);
+    g.vote(p(1), p(3)).unwrap();
+    assert_eq!(g.current_votes(), [(p(1), p(3))].into_iter().collect());
+    assert_eq!(g.majority_target(), None);
 }
 
 #[test]
@@ -416,18 +365,12 @@ fn a_lone_wolf_never_reports_no_consensus() {
 }
 
 #[test]
-fn resolve_day_waits_for_every_living_voter() {
+fn resolve_day_requires_more_than_half_the_living_players() {
     let mut g = night_game(&[W, V, V, V, V]);
     wolves_kill(&mut g, p(1)); // living: P0, P2, P3, P4
-    open_voting(&mut g);
     g.vote(p(0), p(3)).unwrap();
     g.vote(p(2), p(3)).unwrap();
-    assert_eq!(
-        g.resolve_day().unwrap_err(),
-        GameError::ActionsIncomplete {
-            waiting_on: vec![p(3), p(4)],
-        }
-    );
+    assert_eq!(g.resolve_day().unwrap_err(), GameError::NoMajority);
 }
 
 #[test]
@@ -477,15 +420,10 @@ fn villagers_win_by_lynching_both_wolves_on_successive_days() {
 
 #[test]
 fn villagers_win_on_the_last_possible_day() {
-    // Six players, one wolf: the town ties votes while the wolf whittles them down, then lynches it at P0, P4, P5.
-    let mut g = night_game(&[W, V, V, V, V, V]);
-    wolves_kill(&mut g, p(1));
-    town_ties(&mut g);
+    let mut g = Engine::with_roles(&[W, V, V, V, V]).unwrap();
+    town_lynches(&mut g, p(1));
     wolves_kill(&mut g, p(2));
-    town_ties(&mut g);
-    wolves_kill(&mut g, p(3));
-
-    assert_eq!(g.alive_count_by_role(), (2, 1)); // one more night would be parity
+    assert_eq!(g.alive_count_by_role(), (2, 1));
     town_lynches(&mut g, p(0));
     assert_eq!(g.winner(), Some(Winner::Villagers));
 }
@@ -542,15 +480,11 @@ fn a_lone_wolf_cannot_replace_a_valid_pick_with_itself() {
 // ---------------------------------------------------------------------------
 
 #[test]
-fn werewolves_win_by_attrition_while_the_town_dithers() {
-    let mut g = night_game(&[W, V, V, V, V]);
-    wolves_kill(&mut g, p(1));
-    town_ties(&mut g);
+fn werewolves_win_with_repeated_mislynches() {
+    let mut g = Engine::with_roles(&[W, V, V, V, V]).unwrap();
+    town_lynches(&mut g, p(1));
     wolves_kill(&mut g, p(2));
-    town_ties(&mut g);
-    let out = wolves_kill(&mut g, p(3)); // 1 vs 1
-
-    assert_eq!(out, NightOutcome::Killed(p(3)));
+    assert_eq!(town_lynches(&mut g, p(3)), DayOutcome::Eliminated(p(3)));
     assert_eq!(g.phase(), Phase::Ended);
     assert_eq!(g.winner(), Some(Winner::Werewolves));
 }
@@ -579,32 +513,23 @@ fn werewolves_win_at_day_resolution_when_a_lynch_reaches_parity() {
 }
 
 #[test]
-fn werewolves_win_at_night_with_no_day_in_between() {
-    let mut g = night_game(&[W, W, V, V, V, V, V, V]);
-    wolves_kill(&mut g, p(2)); // 5 villagers, 2 wolves
-    town_lynches(&mut g, p(3)); // 4 villagers, 2 wolves
-    wolves_kill(&mut g, p(4)); // 3 villagers, 2 wolves
-    town_ties(&mut g); // town wastes the day
-    let out = wolves_kill(&mut g, p(5)); // 2 vs 2, decided at night
-
-    assert_eq!(out, NightOutcome::Killed(p(5)));
-    assert_eq!(g.phase(), Phase::Ended); // straight to Ended, never re-entered Day
+fn werewolves_win_at_night_after_an_opening_mislynch() {
+    let mut g = Engine::with_roles(&[W, W, V, V, V, V, V, V]).unwrap();
+    town_lynches(&mut g, p(2));
+    wolves_kill(&mut g, p(3));
+    town_lynches(&mut g, p(4));
+    assert_eq!(wolves_kill(&mut g, p(5)), NightOutcome::Killed(p(5)));
+    assert_eq!(g.phase(), Phase::Ended);
     assert_eq!(g.winner(), Some(Winner::Werewolves));
 }
 
 #[test]
-fn werewolves_win_a_long_twelve_player_game() {
-    let mut roles = vec![W, W, W];
-    roles.extend(std::iter::repeat_n(V, 9));
-    let mut g = night_game(&roles);
-
-    for target in 3..8 {
-        wolves_kill(&mut g, p(target));
-        town_ties(&mut g);
+fn werewolves_win_a_twelve_player_game() {
+    let mut g = Engine::with_roles(&[W, W, W, V, V, V, V, V, V, V, V, V]).unwrap();
+    for target in [3, 5, 7] {
+        town_lynches(&mut g, p(target));
+        wolves_kill(&mut g, p(target + 1));
     }
-    let out = wolves_kill(&mut g, p(8)); // brings it to 3 vs 3
-
-    assert_eq!(out, NightOutcome::Killed(p(8)));
     assert_eq!(g.winner(), Some(Winner::Werewolves));
     assert_eq!(g.alive_count_by_role(), (3, 3));
 }
@@ -614,16 +539,21 @@ fn werewolves_win_a_long_twelve_player_game() {
 // ---------------------------------------------------------------------------
 
 #[test]
-fn a_tied_vote_eliminates_nobody_and_preserves_the_round() {
-    let mut g = night_game(&[W, V, V, V, V, V]);
-    wolves_kill(&mut g, p(1));
-    let alive_before = g.alive().count();
-    assert_eq!(g.round(), 2);
-
-    assert_eq!(town_ties(&mut g), DayOutcome::NoElimination);
-    assert_eq!(g.phase(), Phase::Night);
-    assert_eq!(g.round(), 2);
-    assert_eq!(g.alive().count(), alive_before);
+fn split_votes_and_a_plurality_keep_the_day_open_until_votes_change() {
+    let mut g = Engine::with_roles(&[W, V, V, V, V, V]).unwrap();
+    for voter in 0..6 {
+        g.vote(p(voter), p(voter)).unwrap();
+    }
+    for voter in [1, 2] {
+        g.vote(p(voter), p(0)).unwrap();
+    }
+    assert!(g.pending_actors().is_empty());
+    let before = g.clone();
+    assert_eq!(g.resolve_day(), Err(GameError::NoMajority));
+    assert_eq!(g, before);
+    g.vote(p(3), p(0)).unwrap();
+    assert_eq!(g.resolve_day(), Ok(DayOutcome::Eliminated(p(0))));
+    assert_eq!(g.winner(), Some(Winner::Villagers));
 }
 
 #[test]
@@ -647,44 +577,22 @@ fn pending_actors_tracks_who_still_owes_an_action() {
 }
 
 #[test]
-fn opening_day_gates_voting_and_round_advances_only_after_night() {
-    for eliminate in [false, true] {
-        let mut g = Engine::with_roles(&[W, V, V, V, V, V]).unwrap();
-        assert_eq!(g.phase(), Phase::Day);
-        assert_eq!(g.round(), 1);
-        assert_eq!(g.pending_actors(), living_ids(&g));
-        assert!(!g.voting_open());
-        assert!(g.ready_players().is_empty());
-        assert!(g.current_votes().is_empty());
-        assert!(g.current_night_picks().is_empty());
-        let before = g.clone();
-        assert_eq!(g.vote(p(0), p(1)), Err(GameError::VotingNotOpen));
-        assert_eq!(g.resolve_day(), Err(GameError::VotingNotOpen));
-        assert!(matches!(
-            g.night_action(p(0), p(1)),
-            Err(GameError::WrongPhase { .. })
-        ));
-        assert!(matches!(
-            g.resolve_night(),
-            Err(GameError::WrongPhase { .. })
-        ));
-        assert_eq!(g, before);
-        if eliminate {
-            assert_eq!(town_lynches(&mut g, p(1)), DayOutcome::Eliminated(p(1)));
-        } else {
-            assert_eq!(town_ties(&mut g), DayOutcome::NoElimination);
-        }
-        assert_eq!(g.phase(), Phase::Night);
-        assert_eq!(g.round(), 1);
-        assert!(g.current_votes().is_empty());
-        assert!(g.ready_players().is_empty());
-        wolves_kill(&mut g, p(2));
-        assert_eq!(g.phase(), Phase::Day);
-        assert_eq!(g.round(), 2);
-        assert!(!g.voting_open());
-        assert!(g.ready_players().is_empty());
-        assert_eq!(g.pending_actors(), living_ids(&g));
-    }
+fn opening_day_accepts_votes_and_rejects_night_actions() {
+    let mut g = Engine::with_roles(&[W, V, V, V, V, V]).unwrap();
+    let before = g.clone();
+    assert!(matches!(
+        g.night_action(p(0), p(1)),
+        Err(GameError::WrongPhase { .. })
+    ));
+    assert!(matches!(
+        g.resolve_night(),
+        Err(GameError::WrongPhase { .. })
+    ));
+    assert_eq!(g, before);
+    g.vote(p(0), p(1)).unwrap();
+    assert_eq!(g.current_votes(), [(p(0), p(1))].into_iter().collect());
+    assert_eq!(g.phase(), Phase::Day);
+    assert_eq!(g.round(), 1);
 }
 
 #[test]
@@ -710,14 +618,12 @@ fn identical_rosters_and_commands_produce_identical_games() {
         g.night_action(p(0), p(3)).unwrap();
         g.night_action(p(2), p(3)).unwrap();
         g.resolve_night().unwrap();
-        open_voting(g);
         for voter in [0, 1, 2, 4, 5, 6, 7] {
             g.vote(p(voter), p(0)).unwrap();
         }
         g.resolve_day().unwrap();
         g.night_action(p(2), p(4)).unwrap();
         g.resolve_night().unwrap();
-        open_voting(g);
         for voter in [1, 2, 5, 6, 7] {
             g.vote(p(voter), p(2)).unwrap();
         }
@@ -773,7 +679,7 @@ fn doctor_can_save_any_role_including_self_and_protection_expires() {
         assert_eq!(g.alive().count(), 6);
         assert!(g.current_doctor_picks().is_empty());
         assert_eq!(g.round(), 2);
-        town_ties(&mut g);
+        town_lynches(&mut g, p(4));
         g.doctor_action(p(1), p(0)).unwrap();
         g.seer_action(p(2), p(1)).unwrap();
         assert_eq!(wolves_kill(&mut g, p(3)), NightOutcome::Killed(p(3)));
@@ -794,7 +700,7 @@ fn seer_learns_alignment_once_per_night_and_history_survives_resolution() {
     assert_eq!(g, before);
     g.doctor_action(p(1), p(1)).unwrap();
     assert_eq!(wolves_kill(&mut g, p(1)), NightOutcome::Saved(p(1)));
-    town_ties(&mut g);
+    town_lynches(&mut g, p(4));
     let second = g.seer_action(p(2), p(1)).unwrap();
     assert!(!second.is_werewolf);
     assert_eq!(second.round, 2);
@@ -846,7 +752,7 @@ fn special_role_rejections_do_not_change_state() {
         Err(GameError::WrongPhase { .. })
     ));
     assert_eq!(g, before);
-    town_ties(&mut g);
+    town_lynches(&mut g, p(4));
     let before = g.clone();
     assert_eq!(
         g.doctor_action(p(1), p(3)),
@@ -889,7 +795,7 @@ fn killed_special_roles_do_not_block_future_nights_and_still_act_on_their_last_n
             NightOutcome::Killed(p(victim))
         );
         assert_eq!(g.inspections().len(), 1);
-        town_ties(&mut g);
+        town_lynches(&mut g, p(4));
         assert!(!g.pending_actors().contains(&p(victim)));
         let before = g.clone();
         if victim == 1 {

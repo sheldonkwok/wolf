@@ -278,51 +278,27 @@ class Table {
     const alive = livingIds(this.state()).map(nameOf);
     console.log(`Alive: ${alive.join(", ")}`);
 
-    if (this.iAmAlive()) {
-      console.log("Press Enter when you are ready to open elimination voting.");
-      if (await this.reader.next() === null) return false;
-      this.game.readyToVote(this.me);
+    console.log(`${this.state().majorityRequired} votes for one player are needed. Votes can change until then.`);
+    while (this.state().majorityTarget == null) {
+      let myVote: number | null = null;
+      if (this.iAmAlive()) {
+        const picked = await this.promptPlayer("Who do you vote for?", livingIds(this.state()));
+        if (picked === null) return false;
+        myVote = picked;
+        this.game.vote(this.me, picked);
+        console.log(`${nameOf(this.me)} → ${nameOf(picked)}`);
+      }
+      const wolfTarget = this.iAmAlive() && this.iAmWolf() ? myVote! : randomLivingVillager(this.state(), this.rng);
+      for (const id of livingIds(this.state()).filter(id => id !== this.me)) {
+        if (this.state().majorityTarget != null) break;
+        const target = !this.iAmAlive() || isWolf(this.state(), id) ? wolfTarget : villagerBotVote(this.state(), this.rng, myVote, id);
+        this.game.vote(id, target);
+        console.log(`${nameOf(id)} → ${nameOf(target)}`);
+      }
+      if (this.state().majorityTarget == null) console.log("No majority yet. Discuss and vote again.");
     }
-    for (const id of livingIds(this.state()).filter(id => id !== this.me)) {
-      if (this.state().votingOpen) break;
-      this.game.readyToVote(id);
-    }
-    console.log("A majority is ready. Elimination voting is open.");
-
-    let myVote: number | null = null;
-    if (this.iAmAlive()) {
-      const choices = livingIds(this.state()).filter((id) => id !== this.me);
-      const picked = await this.promptPlayer("Who do you vote for?", choices);
-      if (picked === null) return false;
-      myVote = picked;
-    }
-
-    // Wolves bloc-vote: with the human leading the pack, that vote; otherwise a random villager.
-    const wolfTarget =
-      this.iAmAlive() && this.iAmWolf()
-        ? myVote!
-        : randomLivingVillager(this.state(), this.rng);
-
-    const votes: Array<[number, number]> = [];
-    for (const id of livingIds(this.state())) {
-      let target: number;
-      if (id === this.me) target = myVote!;
-      else if (isWolf(this.state(), id)) target = wolfTarget;
-      else target = villagerBotVote(this.state(), this.rng, myVote, id);
-      this.game.vote(id, target);
-      votes.push([id, target]);
-    }
-
-    const rendered = votes.map(([v, t]) => `${nameOf(v)}→${nameOf(t)}`);
-    console.log(`Votes: ${rendered.join("  ")}`);
-
     const outcome = this.game.resolveDay();
-    if (outcome.kind === "Eliminated") {
-      const id = outcome.eliminated;
-      console.log(`${nameOf(id)} was eliminated. (${roleTag(this.game.roleOf(id))})`);
-    } else {
-      console.log("The vote was tied for the lead. No one was eliminated.");
-    }
+    console.log(`${nameOf(outcome.eliminated)} was eliminated. (${roleTag(this.game.roleOf(outcome.eliminated))})`);
 
     if (!this.iAmAlive()) await this.waitForEnter();
     return true;
