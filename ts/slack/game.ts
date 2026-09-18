@@ -1,5 +1,5 @@
 import { GameError, Rng, timeSeed } from "../engine.js";
-import { livingWolves, randomLivingVillager, villagerBotVote } from "../bots.js";
+import { livingIds, livingWolves, pick, randomLivingOther, randomLivingVillager, villagerBotVote } from "../bots.js";
 import { Lobby, LobbyError } from "../lobby.js";
 
 export interface Choice {
@@ -139,7 +139,17 @@ export class SlackGame {
     const target = Number(targetText);
     if (!Number.isSafeInteger(target) || !this.lobby.memberAt(target)) throw new CommandError("Unknown target.");
     const state = game.state();
-    if (state.phase === "Night") game.nightAction(seat, target);
+    if (state.phase === "Night") {
+      switch (game.roleOf(seat)) {
+        case "Doctor": game.doctorAction(seat, target); break;
+        case "Seer": {
+          const result = game.seerAction(seat, target);
+          this.dm(user, `Your inspection: ${this.mention(result.target)} is ${result.isWerewolf ? "a Werewolf" : "innocent"}.`);
+          break;
+        }
+        default: game.nightAction(seat, target);
+      }
+    }
     else if (state.phase === "Day" && state.votingOpen) game.vote(seat, target);
     else throw new CommandError("There is no choice to make right now.");
     this.dm(user, `Your ${state.phase === "Night" ? "night choice" : "vote"} for ${this.mention(target)} is recorded.`);
@@ -161,7 +171,13 @@ export class SlackGame {
       if (state.pendingActors.length > 0) {
         if (state.phase === "Night") {
           const target = state.nightPicks[0]?.target ?? randomLivingVillager(state, this.rng);
-          for (const seat of state.pendingActors) game.nightAction(seat, target);
+          for (const seat of state.pendingActors) {
+            switch (game.roleOf(seat)) {
+              case "Doctor": game.doctorAction(seat, pick(this.rng, livingIds(state))); break;
+              case "Seer": game.seerAction(seat, randomLivingOther(state, this.rng, seat)); break;
+              default: game.nightAction(seat, target);
+            }
+          }
         } else {
           const humanVote = state.votes.find(v => !this.isBot(v.voter))?.target ?? null;
           const wolfVote = state.votes.find(v => !this.isBot(v.voter) && game.roleOf(v.voter) === "Werewolf")?.target;
@@ -200,7 +216,8 @@ export class SlackGame {
         this.promptActors();
         return false;
       }
-      this.elimination(result.killed, "during the night");
+      if (result.kind === "Saved") this.publish(`The Werewolves attacked ${this.mention(result.saved)}, but the Doctor saved them! No one was eliminated.`);
+      else this.elimination(result.killed, "during the night");
     } else {
       const result = game.resolveDay();
       this.prompt = crypto.randomUUID();
@@ -222,7 +239,7 @@ export class SlackGame {
       return;
     }
     if (state.phase === "Night") {
-      this.publish(`Night ${state.round}. The village sleeps. Werewolves, check your DMs.`);
+      this.publish(`Night ${state.round}. The village sleeps. Players with night actions, check your DMs.`);
       this.promptActors();
     } else {
       this.publish(`Day ${state.round}. Discuss in <#${this.channel}>. Use \`@werewolf ready\` or DM \`ready to vote\` when you are ready. Elimination voting opens when more than half of the living players are ready (${state.readinessRequired} needed).${this.dev ? " Dev bots add their readiness when a human is ready; one human is enough in a solo game." : ""}\n${this.livingRoster()}`);
@@ -238,11 +255,16 @@ export class SlackGame {
     const state = this.lobby.game!.state();
     const seat = this.lobby.seatOf(user)!;
     if (!state.pendingActors.includes(seat) || (state.phase === "Day" && !state.votingOpen)) return;
-    const excludeSelf = state.phase === "Night" && livingWolves(state).length === 1;
+    const role = this.lobby.game!.roleOf(seat);
+    const excludeSelf = state.phase === "Night" && role === "Werewolf" && livingWolves(state).length === 1;
+    const instruction = state.phase !== "Night" ? "choose who to eliminate. Your vote is final"
+      : role === "Doctor" ? "choose someone to protect, including yourself. Your choice is final"
+      : role === "Seer" ? "choose someone to inspect. Only you will receive the result. Your choice is final"
+      : "choose the pack's target. All wolves must agree";
     this.messages.push({
       destination: "dm",
       user,
-      text: `${state.phase} ${state.round}: ${state.phase === "Night" ? "choose the pack's target. All wolves must agree" : "choose who to eliminate. Your vote is final"}.\n${this.livingRoster()}`,
+      text: `${state.phase} ${state.round}: ${instruction}.\n${this.livingRoster()}`,
       choices: state.players.filter(p => p.alive && (!excludeSelf || p.id !== seat)).map(p => ({
         label: `Player ${p.id + 1}`,
         value: `${this.prompt}:${user}:${p.id}`,
@@ -256,6 +278,8 @@ export class SlackGame {
     const role = game.roleOf(seat);
     const pack = role === "Werewolf"
       ? ` Your pack: ${game.state().players.filter(p => p.role === "Werewolf").map(p => this.mention(p.id)).join(", ")}. Coordinate privately.`
+      : role === "Doctor" ? " Each night, protect one player, including yourself, from the werewolves. You win with the village."
+      : role === "Seer" ? " Each night, inspect one player to learn privately whether they are a werewolf or innocent. You win with the village."
       : " Find the werewolves through discussion and voting.";
     this.dm(user, `You are Player ${seat + 1}, a ${role}.${pack}${game.isAlive(seat) ? "" : " You were eliminated and are now a spectator."}`);
   }
@@ -266,6 +290,10 @@ export class SlackGame {
       return;
     }
     this.sendRole(user);
+    const seat = this.lobby.seatOf(user)!;
+    for (const result of this.lobby.game.state().inspections.filter(result => result.seer === seat)) {
+      this.dm(user, `Night ${result.round} inspection: ${this.mention(result.target)} is ${result.isWerewolf ? "a Werewolf" : "innocent"}.`);
+    }
     this.dm(user, this.status());
     this.sendPrompt(user);
   }

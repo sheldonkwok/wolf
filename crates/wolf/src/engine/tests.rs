@@ -732,3 +732,196 @@ fn identical_rosters_and_commands_produce_identical_games() {
     assert_eq!(a, b);
     assert_eq!(a.winner(), Some(Winner::Villagers));
 }
+
+#[test]
+fn random_deals_include_one_doctor_and_one_seer_on_the_village_team() {
+    for count in 5..=12 {
+        for seed in 0..50 {
+            let g = Engine::with_seed(count, seed).unwrap();
+            for role in [Role::Doctor, Role::Seer] {
+                assert_eq!(g.players().iter().filter(|p| p.role() == role).count(), 1);
+            }
+            assert_eq!(g.alive_count_by_role(), (count - count / 4, count / 4));
+        }
+    }
+    for role in [Role::Doctor, Role::Seer] {
+        assert!(matches!(
+            Engine::with_roles(&[W, role, role, V, V]),
+            Err(GameError::InvalidRoster(_))
+        ));
+    }
+}
+
+#[test]
+fn doctor_can_save_any_role_including_self_and_protection_expires() {
+    for target in 0..5 {
+        let mut g = night_game(&[W, Role::Doctor, Role::Seer, V, V, W]);
+        g.night_action(p(0), p(target)).unwrap();
+        g.night_action(p(5), p(target)).unwrap();
+        let before = g.clone();
+        assert_eq!(
+            g.resolve_night(),
+            Err(GameError::ActionsIncomplete {
+                waiting_on: vec![p(1), p(2)]
+            })
+        );
+        assert_eq!(g, before);
+        g.doctor_action(p(1), p(target)).unwrap();
+        g.seer_action(p(2), p(0)).unwrap();
+        assert!(g.pending_actors().is_empty());
+        assert_eq!(g.resolve_night(), Ok(NightOutcome::Saved(p(target))));
+        assert_eq!(g.alive().count(), 6);
+        assert!(g.current_doctor_picks().is_empty());
+        assert_eq!(g.round(), 2);
+        town_ties(&mut g);
+        g.doctor_action(p(1), p(0)).unwrap();
+        g.seer_action(p(2), p(1)).unwrap();
+        assert_eq!(wolves_kill(&mut g, p(3)), NightOutcome::Killed(p(3)));
+    }
+}
+
+#[test]
+fn seer_learns_alignment_once_per_night_and_history_survives_resolution() {
+    let mut g = night_game(&[W, Role::Doctor, Role::Seer, V, V]);
+    let first = g.seer_action(p(2), p(0)).unwrap();
+    assert!(first.is_werewolf);
+    assert_eq!(first.round, 1);
+    let before = g.clone();
+    assert_eq!(
+        g.seer_action(p(2), p(1)),
+        Err(GameError::AlreadyActed(p(2)))
+    );
+    assert_eq!(g, before);
+    g.doctor_action(p(1), p(1)).unwrap();
+    assert_eq!(wolves_kill(&mut g, p(1)), NightOutcome::Saved(p(1)));
+    town_ties(&mut g);
+    let second = g.seer_action(p(2), p(1)).unwrap();
+    assert!(!second.is_werewolf);
+    assert_eq!(second.round, 2);
+    assert_eq!(g.inspections(), &[first, second]);
+}
+
+#[test]
+fn special_role_rejections_do_not_change_state() {
+    let mut g = night_game(&[W, Role::Doctor, Role::Seer, V, V, V]);
+    let before = g.clone();
+    assert_eq!(
+        g.doctor_action(p(3), p(0)),
+        Err(GameError::NotADoctor(p(3)))
+    );
+    assert_eq!(g.seer_action(p(1), p(0)), Err(GameError::NotASeer(p(1))));
+    assert_eq!(
+        g.doctor_action(p(99), p(0)),
+        Err(GameError::UnknownPlayer(p(99)))
+    );
+    assert_eq!(
+        g.seer_action(p(99), p(0)),
+        Err(GameError::UnknownPlayer(p(99)))
+    );
+    assert_eq!(
+        g.doctor_action(p(1), p(99)),
+        Err(GameError::UnknownPlayer(p(99)))
+    );
+    assert_eq!(
+        g.seer_action(p(2), p(99)),
+        Err(GameError::UnknownPlayer(p(99)))
+    );
+    assert_eq!(g, before);
+    g.doctor_action(p(1), p(1)).unwrap();
+    let before = g.clone();
+    assert_eq!(
+        g.doctor_action(p(1), p(0)),
+        Err(GameError::AlreadyActed(p(1)))
+    );
+    assert_eq!(g, before);
+    g.seer_action(p(2), p(0)).unwrap();
+    wolves_kill(&mut g, p(3));
+    let before = g.clone();
+    assert!(matches!(
+        g.doctor_action(p(1), p(1)),
+        Err(GameError::WrongPhase { .. })
+    ));
+    assert!(matches!(
+        g.seer_action(p(2), p(0)),
+        Err(GameError::WrongPhase { .. })
+    ));
+    assert_eq!(g, before);
+    town_ties(&mut g);
+    let before = g.clone();
+    assert_eq!(
+        g.doctor_action(p(1), p(3)),
+        Err(GameError::PlayerNotAlive(p(3)))
+    );
+    assert_eq!(
+        g.seer_action(p(2), p(3)),
+        Err(GameError::PlayerNotAlive(p(3)))
+    );
+    assert_eq!(g, before);
+}
+
+#[test]
+fn a_split_pack_preserves_special_actions_and_seer_cannot_inspect_again() {
+    let mut g = night_game(&[W, W, Role::Doctor, Role::Seer, V, V, V]);
+    g.doctor_action(p(2), p(4)).unwrap();
+    g.seer_action(p(3), p(0)).unwrap();
+    g.night_action(p(0), p(4)).unwrap();
+    g.night_action(p(1), p(5)).unwrap();
+    assert!(matches!(
+        g.resolve_night(),
+        Ok(NightOutcome::NoConsensus { .. })
+    ));
+    assert_eq!(g.pending_actors(), vec![p(0), p(1)]);
+    assert_eq!(
+        g.seer_action(p(3), p(1)),
+        Err(GameError::AlreadyActed(p(3)))
+    );
+    assert_eq!(wolves_kill(&mut g, p(4)), NightOutcome::Saved(p(4)));
+}
+
+#[test]
+fn killed_special_roles_do_not_block_future_nights_and_still_act_on_their_last_night() {
+    for victim in [1, 2] {
+        let mut g = night_game(&[W, Role::Doctor, Role::Seer, V, V, V]);
+        g.doctor_action(p(1), p(3)).unwrap();
+        g.seer_action(p(2), p(0)).unwrap();
+        assert_eq!(
+            wolves_kill(&mut g, p(victim)),
+            NightOutcome::Killed(p(victim))
+        );
+        assert_eq!(g.inspections().len(), 1);
+        town_ties(&mut g);
+        assert!(!g.pending_actors().contains(&p(victim)));
+        let before = g.clone();
+        if victim == 1 {
+            assert_eq!(
+                g.doctor_action(p(1), p(0)),
+                Err(GameError::PlayerNotAlive(p(1)))
+            );
+        } else {
+            assert_eq!(
+                g.seer_action(p(2), p(0)),
+                Err(GameError::PlayerNotAlive(p(2)))
+            );
+        }
+        assert_eq!(g, before);
+    }
+}
+
+#[test]
+fn special_roles_count_for_parity_and_cannot_act_after_game_over() {
+    let mut g = night_game(&[W, Role::Doctor, Role::Seer, V, V]);
+    g.doctor_action(p(1), p(1)).unwrap();
+    g.seer_action(p(2), p(0)).unwrap();
+    wolves_kill(&mut g, p(3));
+    town_lynches(&mut g, p(4));
+    assert_eq!(g.alive_count_by_role(), (2, 1));
+    assert!(!g.is_over());
+    g.doctor_action(p(1), p(1)).unwrap();
+    g.seer_action(p(2), p(0)).unwrap();
+    wolves_kill(&mut g, p(2));
+    assert_eq!(g.winner(), Some(Winner::Werewolves));
+    let before = g.clone();
+    assert_eq!(g.doctor_action(p(1), p(1)), Err(GameError::GameOver));
+    assert_eq!(g.seer_action(p(2), p(0)), Err(GameError::GameOver));
+    assert_eq!(g, before);
+}

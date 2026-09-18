@@ -70,3 +70,10 @@ test("pick draws the below(len) element", () => {
   const pool = [10, 20, 30, 40];
   for (let i = 0; i < 200; i++) expect(pool).toContain(pick(rng, pool));
 });
+
+test("wolf targets include doctors and seers on the village team", () => {
+  const state = Game.withRoles(["Werewolf", "Doctor", "Seer", "Villager", "Villager"]).state();
+  const rng = new Rng(42n);
+  const targets = new Set(Array.from({ length: 100 }, () => randomLivingVillager(state, rng)));
+  expect(targets).toEqual(new Set([1, 2, 3, 4]));
+});

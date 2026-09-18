@@ -13,7 +13,7 @@ export function livingWolves(state: GameState): number[] {
 }
 
 export function livingVillagers(state: GameState): number[] {
-  return state.players.filter((p) => p.alive && p.role === "Villager").map((p) => p.id);
+  return state.players.filter((p) => p.alive && p.role !== "Werewolf").map((p) => p.id);
 }
 
 export function isWolf(state: GameState, id: number): boolean {

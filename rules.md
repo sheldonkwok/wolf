@@ -18,6 +18,8 @@
 
 ---
 
+For the chat game, the engine is the moderator and does not take a seat. Games have at least 5 players, one Doctor, one Seer, `max(1, player_count / 4)` Werewolves (rounded down), and Villagers in the remaining seats.
+
 ## The Roles Explained
 
 * 🧑‍🌾 **Villagers:** The innocent townsfolk. They do not have night actions, but during the day they listen to clues, debate, and vote to catch the Werewolves.
@@ -54,9 +56,11 @@ The Moderator speaks aloud while everyone keeps their eyes tightly shut:
 2. **"Werewolves, open your eyes and pick your target."**  
    *(Werewolves open eyes, point silently to one victim, then close eyes). If only one Werewolf is alive, they cannot target themselves.*
 3. **"Doctor, open your eyes and choose someone to save."**  
-   *(Doctor opens eyes, points to one player—can be themselves—then closes eyes).*
+   *(Doctor opens eyes, points to one player—can be themselves—then closes eyes). The choice is final for that night and protection expires at dawn.*
 4. **"Seer, open your eyes and pick someone to inspect."**  
-   *(Seer opens eyes, points to a player. The Moderator gives a 👍 [Innocent] or 👎 [Werewolf]. Seer closes eyes).*
+   *(Seer opens eyes, points to one living player. The Moderator privately reveals 👍 [Innocent] or 👎 [Werewolf], without revealing the exact innocent role. Seer closes eyes). One inspection per night; the choice is final.*
+
+In chat, living night roles can submit their choices in any order. The night resolves after all have acted, so a player targeted by the Werewolves still gets their night action. If the Werewolves disagree, only the pack chooses again; protection and inspection choices remain in place.
 
 After the night actions resolve, check for a winner. If the game continues, begin the next numbered day.
 

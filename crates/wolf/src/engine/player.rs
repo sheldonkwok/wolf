@@ -17,11 +17,13 @@ impl fmt::Display for PlayerId {
     }
 }
 
-/// The role a player was dealt. This slice only has the two core roles.
+/// The secret role a player was dealt.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Role {
     Villager,
     Werewolf,
+    Doctor,
+    Seer,
 }
 
 /// A player and everything the engine tracks about them.

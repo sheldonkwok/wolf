@@ -1,4 +1,4 @@
-//! Wolf — a werewolf / mafia game engine: two roles ([`Role::Villager`], [`Role::Werewolf`]) with the [`Engine`] as moderator, owning all state behind read-only accessors and validating every command.
+//! Wolf — a werewolf / mafia game engine: four roles ([`Role::Villager`], [`Role::Werewolf`], [`Role::Doctor`], [`Role::Seer`]) with the [`Engine`] as moderator, owning all state behind read-only accessors and validating every command.
 //!
 //! A wolf may revise their night pick at any time before the night resolves; a split pack resolves to [`NightOutcome::NoConsensus`] and picks again rather than deadlocking.
 //!
@@ -31,5 +31,5 @@ mod engine;
 pub mod rng;
 
 pub use engine::{
-    DayOutcome, Engine, GameError, NightOutcome, Phase, Player, PlayerId, Role, Winner,
+    DayOutcome, Engine, GameError, Inspection, NightOutcome, Phase, Player, PlayerId, Role, Winner,
 };

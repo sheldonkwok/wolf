@@ -34,9 +34,13 @@ function playOut(game: Game): void {
     const s = game.state();
     if (s.phase === "Ended") return;
     if (s.phase === "Night") {
-      const victim = s.players.find((p) => p.alive && p.role === "Villager")!.id;
+      const victim = s.players.find((p) => p.alive && p.role !== "Werewolf")!.id;
       const wolves = s.players.filter((p) => p.alive && p.role === "Werewolf").map((p) => p.id);
       for (const wolf of wolves) game.nightAction(wolf, victim);
+      for (const player of s.players.filter(p => p.alive)) {
+        if (player.role === "Doctor") game.doctorAction(player.id, wolves[0]!);
+        if (player.role === "Seer") game.seerAction(player.id, wolves[0]!);
+      }
       expect(game.resolveNight().kind).toBe("Killed");
     } else {
       const living = s.players.filter((p) => p.alive).map((p) => p.id);

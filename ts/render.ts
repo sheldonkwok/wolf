@@ -13,7 +13,7 @@ export function nameOf(id: number): string {
   return NAMES[id] ?? `P${id}`;
 }
 
-// The Role string enum already reads "Villager" / "Werewolf".
+// Role names are already suitable for display.
 export function roleTag(role: Role): string {
   return role;
 }

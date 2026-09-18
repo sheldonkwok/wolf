@@ -6,6 +6,7 @@ import {
   timeSeed,
   type DayResult,
   type GameState,
+  type InspectionView,
   type NightResult,
   type PlayerView,
   type Role,
@@ -14,7 +15,7 @@ import {
 } from "./native/index.js";
 
 export { Rng, timeSeed };
-export type { GameState, PlayerView, Role, VoteView, Winner };
+export type { InspectionView, GameState, PlayerView, Role, VoteView, Winner };
 
 // Stable tags mirrored from wolf::GameError::code in the engine crate.
 const GAME_ERROR_CODES = [
@@ -23,6 +24,8 @@ const GAME_ERROR_CODES = [
   "UnknownPlayer",
   "PlayerNotAlive",
   "NotAWerewolf",
+  "NotADoctor",
+  "NotASeer",
   "LastWolfCannotTargetSelf",
   "WrongPhase",
   "AlreadyActed",
@@ -68,6 +71,7 @@ function attempt<T>(call: () => T): T {
 
 export type NightResolution =
   | { kind: "Killed"; killed: number }
+  | { kind: "Saved"; saved: number }
   | { kind: "NoConsensus"; targets: number[] };
 
 export type DayResolution =
@@ -81,6 +85,9 @@ function isSeat(value: unknown): value is number {
 function normalizeNight(result: NightResult): NightResolution {
   if (result?.kind === "Killed" && isSeat(result.killed)) {
     return { kind: "Killed", killed: result.killed };
+  }
+  if (result?.kind === "Saved" && isSeat(result.saved)) {
+    return { kind: "Saved", saved: result.saved };
   }
   if (result?.kind === "NoConsensus" && Array.isArray(result.targets) && result.targets.every(isSeat)) {
     return { kind: "NoConsensus", targets: result.targets };
@@ -120,6 +127,14 @@ export class Game {
 
   nightAction(wolf: number, target: number): void {
     attempt(() => this.inner.nightAction(wolf, target));
+  }
+
+  doctorAction(doctor: number, target: number): void {
+    attempt(() => this.inner.doctorAction(doctor, target));
+  }
+
+  seerAction(seer: number, target: number): InspectionView {
+    return attempt(() => this.inner.seerAction(seer, target));
   }
 
   resolveNight(): NightResolution {

@@ -3,6 +3,8 @@
 
 import {
   livingIds,
+  pick,
+  randomLivingOther,
   livingWolves,
   isWolf,
   randomLivingVillager,
@@ -134,6 +136,7 @@ class LineReader {
 
 class Table {
   private nightVictim: number | null = null;
+  private nightSaved: number | null = null;
 
   constructor(
     private game: Game,
@@ -207,25 +210,47 @@ class Table {
     } else {
       console.log(
         this.iAmAlive()
-          ? "You close your eyes and wait for morning."
+          ? "The village sleeps while the night roles act."
           : "Night falls on the village. Everyone close your eyes.",
       );
       target = randomLivingVillager(this.state(), this.rng);
     }
 
-    let pick = target;
+    for (const actor of this.state().pendingActors) {
+      const role = this.game.roleOf(actor);
+      if (role !== "Doctor" && role !== "Seer") continue;
+      let chosen: number;
+      if (actor === this.me) {
+        const picked = await this.promptPlayer(
+          role === "Doctor" ? "Doctor, choose someone to protect (you may choose yourself)." : "Seer, choose someone to inspect.",
+          livingIds(this.state()),
+        );
+        if (picked === null) return false;
+        chosen = picked;
+      } else {
+        chosen = role === "Doctor" ? pick(this.rng, livingIds(this.state())) : randomLivingOther(this.state(), this.rng, actor);
+      }
+      if (role === "Doctor") this.game.doctorAction(actor, chosen);
+      else {
+        const result = this.game.seerAction(actor, chosen);
+        if (actor === this.me) console.log(`${nameOf(chosen)} is ${result.isWerewolf ? "a Werewolf" : "innocent"}.`);
+      }
+    }
+
+    let wolfPick = target;
     for (;;) {
       for (const wolf of livingWolves(this.state())) {
-        this.game.nightAction(wolf, pick);
+        this.game.nightAction(wolf, wolfPick);
       }
       const outcome = this.game.resolveNight();
-      if (outcome.kind === "Killed") {
-        this.nightVictim = outcome.killed;
+      if (outcome.kind !== "NoConsensus") {
+        this.nightVictim = outcome.kind === "Killed" ? outcome.killed : null;
+        this.nightSaved = outcome.kind === "Saved" ? outcome.saved : null;
         break;
       }
       // The pack is always unanimous, so this is only a safety net.
       console.log("The pack split and nobody died. They pick again.");
-      pick = randomLivingVillager(this.state(), this.rng);
+      wolfPick = randomLivingVillager(this.state(), this.rng);
     }
 
     if (!this.iAmAlive()) await this.waitForEnter();
@@ -243,6 +268,9 @@ class Table {
       console.log(
         `Sadly, ${nameOf(victim)} was eliminated by the Werewolves! (${roleTag(this.game.roleOf(victim))})`,
       );
+    } else if (this.nightSaved !== null) {
+      console.log(`The Werewolves attacked ${nameOf(this.nightSaved)}, but the Doctor saved them!`);
+      this.nightSaved = null;
     } else if (this.state().round > 1) {
       console.log("Everyone is still here — no one was eliminated in the night.");
     }

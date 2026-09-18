@@ -15,6 +15,8 @@ use wolf::{
 pub enum Role {
     Villager,
     Werewolf,
+    Doctor,
+    Seer,
 }
 
 #[napi(string_enum)]
@@ -33,6 +35,7 @@ pub enum Winner {
 #[napi(string_enum)]
 pub enum NightKind {
     Killed,
+    Saved,
     NoConsensus,
 }
 
@@ -47,6 +50,8 @@ impl From<EngineRole> for Role {
         match r {
             EngineRole::Villager => Role::Villager,
             EngineRole::Werewolf => Role::Werewolf,
+            EngineRole::Doctor => Role::Doctor,
+            EngineRole::Seer => Role::Seer,
         }
     }
 }
@@ -56,6 +61,8 @@ impl From<Role> for EngineRole {
         match r {
             Role::Villager => EngineRole::Villager,
             Role::Werewolf => EngineRole::Werewolf,
+            Role::Doctor => EngineRole::Doctor,
+            Role::Seer => EngineRole::Seer,
         }
     }
 }
@@ -98,6 +105,7 @@ pub struct VoteView {
 pub struct NightResult {
     pub kind: NightKind,
     pub killed: Option<u32>,
+    pub saved: Option<u32>,
     pub targets: Vec<u32>,
 }
 
@@ -105,6 +113,25 @@ pub struct NightResult {
 pub struct DayResult {
     pub kind: DayKind,
     pub eliminated: Option<u32>,
+}
+
+#[napi(object)]
+pub struct InspectionView {
+    pub seer: u32,
+    pub target: u32,
+    pub round: u32,
+    pub is_werewolf: bool,
+}
+
+impl From<wolf::Inspection> for InspectionView {
+    fn from(result: wolf::Inspection) -> Self {
+        Self {
+            seer: seat(result.seer),
+            target: seat(result.target),
+            round: result.round as u32,
+            is_werewolf: result.is_werewolf,
+        }
+    }
 }
 
 #[napi(object)]
@@ -120,6 +147,8 @@ pub struct GameState {
     pub voting_open: bool,
     pub votes: Vec<VoteView>,
     pub night_picks: Vec<VoteView>,
+    pub doctor_picks: Vec<VoteView>,
+    pub inspections: Vec<InspectionView>,
     pub alive_villagers: u32,
     pub alive_wolves: u32,
 }
@@ -135,11 +164,19 @@ fn night_result(outcome: NightOutcome) -> NightResult {
         NightOutcome::Killed(id) => NightResult {
             kind: NightKind::Killed,
             killed: Some(seat(id)),
+            saved: None,
+            targets: Vec::new(),
+        },
+        NightOutcome::Saved(id) => NightResult {
+            kind: NightKind::Saved,
+            killed: None,
+            saved: Some(seat(id)),
             targets: Vec::new(),
         },
         NightOutcome::NoConsensus { targets } => NightResult {
             kind: NightKind::NoConsensus,
             killed: None,
+            saved: None,
             targets: targets.into_iter().map(seat).collect(),
         },
     }
@@ -216,6 +253,23 @@ impl Game {
             .map_err(to_js)
     }
 
+    /// Protect one living player for this night.
+    #[napi]
+    pub fn doctor_action(&mut self, doctor: u32, target: u32) -> napi::Result<()> {
+        self.inner
+            .doctor_action(PlayerId(doctor as usize), PlayerId(target as usize))
+            .map_err(to_js)
+    }
+
+    /// Inspect one living player and return their private alignment result.
+    #[napi]
+    pub fn seer_action(&mut self, seer: u32, target: u32) -> napi::Result<InspectionView> {
+        self.inner
+            .seer_action(PlayerId(seer as usize), PlayerId(target as usize))
+            .map(Into::into)
+            .map_err(to_js)
+    }
+
     /// Resolve the night and advance the phase.
     #[napi]
     pub fn resolve_night(&mut self) -> napi::Result<NightResult> {
@@ -285,6 +339,8 @@ impl Game {
             voting_open: e.voting_open(),
             votes: votes_to_views(e.current_votes()),
             night_picks: votes_to_views(e.current_night_picks()),
+            doctor_picks: votes_to_views(e.current_doctor_picks()),
+            inspections: e.inspections().iter().copied().map(Into::into).collect(),
             alive_villagers: villagers as u32,
             alive_wolves: wolves as u32,
         }

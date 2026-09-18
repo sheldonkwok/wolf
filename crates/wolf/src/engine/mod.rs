@@ -13,7 +13,7 @@ pub use player::{Player, PlayerId, Role};
 /// Which half of the game loop we are in.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Phase {
-    /// Werewolves choose a victim; resolved with [`Engine::resolve_night`].
+    /// Living night roles act; resolved with [`Engine::resolve_night`].
     Night,
     /// Players discuss until a majority is ready, then vote; resolved with [`Engine::resolve_day`].
     Day,
@@ -33,8 +33,19 @@ pub enum Winner {
 pub enum NightOutcome {
     /// The werewolves' target was eliminated.
     Killed(PlayerId),
+    /// The doctor protected the werewolves' target.
+    Saved(PlayerId),
     /// The pack named more than one target; nobody died and they pick again.
     NoConsensus { targets: Vec<PlayerId> },
+}
+
+/// A private seer result, retained for moderator inspection and reconnecting players.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Inspection {
+    pub seer: PlayerId,
+    pub target: PlayerId,
+    pub round: usize,
+    pub is_werewolf: bool,
 }
 
 /// The result of resolving a day.
@@ -55,6 +66,9 @@ pub struct Engine {
     winner: Option<Winner>,
     /// Living werewolf -> the player they named this night.
     night_picks: BTreeMap<PlayerId, PlayerId>,
+    doctor_picks: BTreeMap<PlayerId, PlayerId>,
+    seer_picks: BTreeMap<PlayerId, PlayerId>,
+    inspections: Vec<Inspection>,
     /// Living voter -> the player they voted for this day.
     day_votes: BTreeMap<PlayerId, PlayerId>,
     /// Living players who are ready to open elimination voting this day.
@@ -65,7 +79,7 @@ impl Engine {
     /// The fewest players a game can be built with.
     pub const MIN_PLAYERS: usize = 5;
 
-    /// Build a game for `player_count` players with random roles; wolves are `max(1, player_count / 4)`.
+    /// Build a game for `player_count` players with random roles: one doctor, one seer, `max(1, player_count / 4)` wolves, and villagers.
     pub fn new(player_count: usize) -> Result<Self, GameError> {
         Self::with_seed(player_count, time_seed())
     }
@@ -82,7 +96,11 @@ impl Engine {
         let wolves = (player_count / 4).max(1);
         let mut roles = Vec::with_capacity(player_count);
         roles.extend(std::iter::repeat_n(Role::Werewolf, wolves));
-        roles.extend(std::iter::repeat_n(Role::Villager, player_count - wolves));
+        roles.extend([Role::Doctor, Role::Seer]);
+        roles.extend(std::iter::repeat_n(
+            Role::Villager,
+            player_count - wolves - 2,
+        ));
         SplitMix64::new(seed).shuffle(&mut roles);
 
         Ok(Self::from_roles(&roles))
@@ -106,6 +124,13 @@ impl Engine {
                 "werewolves start at or above parity with villagers",
             ));
         }
+        for role in [Role::Doctor, Role::Seer] {
+            if roles.iter().filter(|r| **r == role).count() > 1 {
+                return Err(GameError::InvalidRoster(
+                    "at most one doctor and one seer are allowed",
+                ));
+            }
+        }
         Ok(Self::from_roles(roles))
     }
 
@@ -121,6 +146,9 @@ impl Engine {
             round: 1,
             winner: None,
             night_picks: BTreeMap::new(),
+            doctor_picks: BTreeMap::new(),
+            seer_picks: BTreeMap::new(),
+            inspections: Vec::new(),
             day_votes: BTreeMap::new(),
             ready_players: BTreeSet::new(),
         }
@@ -146,16 +174,51 @@ impl Engine {
         Ok(())
     }
 
+    /// Protect one living player, including the doctor themselves; the choice is final for this night.
+    pub fn doctor_action(&mut self, doctor: PlayerId, target: PlayerId) -> Result<(), GameError> {
+        self.ensure_phase(Phase::Night)?;
+        if self.require_alive(doctor)?.role() != Role::Doctor {
+            return Err(GameError::NotADoctor(doctor));
+        }
+        self.require_alive(target)?;
+        if self.doctor_picks.contains_key(&doctor) {
+            return Err(GameError::AlreadyActed(doctor));
+        }
+        self.doctor_picks.insert(doctor, target);
+        Ok(())
+    }
+
+    /// Inspect one living player once per night; reveals only werewolf versus innocent.
+    pub fn seer_action(
+        &mut self,
+        seer: PlayerId,
+        target: PlayerId,
+    ) -> Result<Inspection, GameError> {
+        self.ensure_phase(Phase::Night)?;
+        if self.require_alive(seer)?.role() != Role::Seer {
+            return Err(GameError::NotASeer(seer));
+        }
+        let is_werewolf = self.require_alive(target)?.role() == Role::Werewolf;
+        if self.seer_picks.contains_key(&seer) {
+            return Err(GameError::AlreadyActed(seer));
+        }
+        let inspection = Inspection {
+            seer,
+            target,
+            round: self.round,
+            is_werewolf,
+        };
+        self.seer_picks.insert(seer, target);
+        self.inspections.push(inspection);
+        Ok(inspection)
+    }
+
     /// Resolve the night: eliminate the wolves' agreed target, check for a win, advance to [`Phase::Day`] or [`Phase::Ended`].
     pub fn resolve_night(&mut self) -> Result<NightOutcome, GameError> {
         self.ensure_phase(Phase::Night)?;
 
         let living_wolves = self.living_ids_where(|p| p.role() == Role::Werewolf);
-        let waiting_on: Vec<PlayerId> = living_wolves
-            .iter()
-            .copied()
-            .filter(|id| !self.night_picks.contains_key(id))
-            .collect();
+        let waiting_on = self.pending_actors();
         if !waiting_on.is_empty() {
             return Err(GameError::ActionsIncomplete { waiting_on });
         }
@@ -173,14 +236,23 @@ impl Engine {
         }
         let target = targets.into_iter().next().expect("exactly one target");
 
+        let saved = self.doctor_picks.values().any(|&pick| pick == target);
         self.night_picks.clear();
-        self.players[target.index()].kill();
+        self.doctor_picks.clear();
+        self.seer_picks.clear();
+        if !saved {
+            self.players[target.index()].kill();
+        }
         self.settle();
         if self.phase != Phase::Ended {
             self.phase = Phase::Day;
             self.round += 1;
         }
-        Ok(NightOutcome::Killed(target))
+        Ok(if saved {
+            NightOutcome::Saved(target)
+        } else {
+            NightOutcome::Killed(target)
+        })
     }
 
     /// Mark a living player ready; a strict majority opens elimination voting.
@@ -304,26 +376,30 @@ impl Engine {
             .ok_or(GameError::UnknownPlayer(id))
     }
 
-    /// `(living villagers, living werewolves)`.
+    /// `(living village team including doctor and seer, living werewolves)`.
     pub fn alive_count_by_role(&self) -> (usize, usize) {
         let mut villagers = 0;
         let mut wolves = 0;
         for p in self.alive() {
             match p.role() {
-                Role::Villager => villagers += 1,
+                Role::Villager | Role::Doctor | Role::Seer => villagers += 1,
                 Role::Werewolf => wolves += 1,
             }
         }
         (villagers, wolves)
     }
 
-    /// Pending wolves at night, non-ready players during discussion, non-voters during voting, or nobody after ending.
+    /// Pending night roles at night, non-ready players during discussion, non-voters during voting, or nobody after ending.
     pub fn pending_actors(&self) -> Vec<PlayerId> {
         match self.phase {
             Phase::Night => self
-                .living_ids_where(|p| p.role() == Role::Werewolf)
+                .living_ids_where(|p| match p.role() {
+                    Role::Werewolf => !self.night_picks.contains_key(&p.id()),
+                    Role::Doctor => !self.doctor_picks.contains_key(&p.id()),
+                    Role::Seer => !self.seer_picks.contains_key(&p.id()),
+                    Role::Villager => false,
+                })
                 .into_iter()
-                .filter(|id| !self.night_picks.contains_key(id))
                 .collect(),
             Phase::Day => self
                 .living_ids_where(|_| true)
@@ -371,6 +447,16 @@ impl Engine {
         } else {
             BTreeMap::new()
         }
+    }
+
+    /// The doctor's current protection choice; empty outside the night phase.
+    pub fn current_doctor_picks(&self) -> BTreeMap<PlayerId, PlayerId> {
+        self.doctor_picks.clone()
+    }
+
+    /// All private seer results; adapters must only disclose each result to its seer.
+    pub fn inspections(&self) -> &[Inspection] {
+        &self.inspections
     }
 
     // ----- internals --------------------------------------------------------

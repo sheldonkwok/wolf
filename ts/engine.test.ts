@@ -211,6 +211,8 @@ const malformedResults: Array<["resolveDay" | "resolveNight", unknown]> = [
   ["resolveNight", { kind: "Killed", killed: "0", targets: [] }],
   ["resolveNight", { kind: "Killed", killed: NaN, targets: [] }],
   ["resolveNight", { kind: "Killed", killed: Number.MAX_SAFE_INTEGER + 1, targets: [] }],
+  ["resolveNight", { kind: "Saved" }],
+  ["resolveNight", { kind: "Saved", saved: -1 }],
   ["resolveNight", { kind: "NoConsensus" }],
   ["resolveNight", { kind: "NoConsensus", targets: [1, "2"] }],
   ["resolveNight", { kind: "Unexpected", targets: [] }],
@@ -240,3 +242,27 @@ function grab(call: () => unknown): GameError {
   }
   throw new Error("expected the call to throw");
 }
+
+test("special roles cross the binding with final actions, private results, and a saved seat zero", () => {
+  const game = Game.withRoles(["Doctor", "Werewolf", "Seer", "Villager", "Villager"]);
+  expect(game.state().aliveVillagers).toBe(4);
+  reachNight(game);
+  expect(game.state().pendingActors).toEqual([0, 1, 2]);
+  const before = game.state();
+  expect(grab(() => game.doctorAction(3, 0)).code).toBe("NotADoctor");
+  expect(grab(() => game.seerAction(3, 0)).code).toBe("NotASeer");
+  expect(game.state()).toEqual(before);
+  game.nightAction(1, 0);
+  game.doctorAction(0, 0);
+  expect(game.state().doctorPicks).toEqual([{ voter: 0, target: 0 }]);
+  expect(grab(() => game.resolveNight()).code).toBe("ActionsIncomplete");
+  const result = game.seerAction(2, 1);
+  expect(result).toEqual({ seer: 2, target: 1, round: 1, isWerewolf: true });
+  expect(game.state().inspections).toEqual([result]);
+  expect(grab(() => game.seerAction(2, 3)).code).toBe("AlreadyActed");
+  expect(grab(() => game.doctorAction(0, 3)).code).toBe("AlreadyActed");
+  expect(game.resolveNight()).toEqual({ kind: "Saved", saved: 0 });
+  expect(game.state().doctorPicks).toEqual([]);
+  expect(game.state().players.every(p => p.alive)).toBe(true);
+  expect(game.state().round).toBe(2);
+});
