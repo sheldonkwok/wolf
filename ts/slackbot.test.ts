@@ -277,6 +277,29 @@ test("event retries cannot replay a command or cross into another game", () => {
   expect(t.lobby.game!.state().round).toBe(1);
 });
 
+test("day status groups votes into a descending leaderboard with stable ties", () => {
+  const t = table();
+  t.command("start");
+  expect(t.command("status")[0]?.text).toContain("Vote leaderboard (5 needed):\nNo votes yet.");
+  t.vote(0, 4);
+  t.vote(3, 6);
+  t.vote(1, 6);
+  t.vote(2, 5);
+  const leaderboard = "Vote leaderboard (5 needed):\n• <@U6> — 2 votes\n  Voters: <@U1>, <@U3>\n• <@U4> — 1 vote\n  Voters: <@U0>\n• <@U5> — 1 vote\n  Voters: <@U2>";
+  expect(t.command("status")[0]?.text).toContain(leaderboard);
+  expect(t.dm("U0").some(m => m.text.includes(leaderboard))).toBe(true);
+  t.vote(0, 6);
+  t.vote(0, 6);
+  const status = t.command("status")[0]!.text;
+  expect(status).toContain("• <@U6> — 3 votes\n  Voters: <@U0>, <@U1>, <@U3>");
+  expect(status).not.toContain("• <@U4>");
+  expect(status).not.toContain("→");
+  reachNight(t);
+  expect(t.command("status")[0]?.text).not.toContain("Vote leaderboard");
+  morning(t);
+  expect(t.command("status")[0]?.text).toContain("No votes yet.");
+});
+
 test("public votes resolve immediately at a strict living majority on every day", () => {
   for (const count of [5, 6, 8]) {
     const t = table(count);
@@ -326,7 +349,7 @@ test("split votes stay in day, votes can change, and retries never count twice",
   t.vote(2, 0);
   expect(t.lobby.game!.state().phase).toBe("Day");
   expect(t.command("status")[0]?.text).toContain("4 needed");
-  expect(t.command("status")[0]?.text).toContain("<@U2> → <@U0>");
+  expect(t.command("status")[0]?.text).toContain("• <@U0> — 3 votes\n  Voters: <@U0>, <@U1>, <@U2>");
   const game = t.lobby.game!;
   t.vote(3, 0);
   expect(game.isAlive(0)).toBe(false);

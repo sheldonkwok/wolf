@@ -302,9 +302,23 @@ export class SlackGame {
   private status(): string {
     const state = this.lobby.game?.state();
     if (!state) return this.roster();
-    const votes = state.phase === "Day" ? `\nVotes (${state.majorityRequired} needed): ${state.votes.length ? state.votes.map(v => `${this.mention(v.voter)} → ${this.mention(v.target)}`).join(", ") : "none"}. Vote with \`@werewolf vote @player\`.` : "";
+    const votes = state.phase === "Day" ? `\n${this.voteLeaderboard()}\nVote with \`@werewolf vote @player\`.` : "";
     const night = state.phase === "Night" ? "\nNight ends automatically once all living players with night actions have submitted their choices. DM `status` to check your own action or get your buttons again." : "";
     return `${state.phase} ${state.round}.\n${this.livingRoster()}${votes}${night}`;
+  }
+
+  private voteLeaderboard(): string {
+    const state = this.lobby.game!.state();
+    const votersByTarget = new Map<number, number[]>();
+    for (const { voter, target } of state.votes) {
+      const voters = votersByTarget.get(target) ?? [];
+      voters.push(voter);
+      votersByTarget.set(target, voters);
+    }
+    const rows = [...votersByTarget.entries()]
+      .sort(([a, av], [b, bv]) => bv.length - av.length || a - b)
+      .map(([target, voters]) => `• ${this.mention(target)} — ${voters.length} ${voters.length === 1 ? "vote" : "votes"}\n  Voters: ${voters.sort((a, b) => a - b).map(voter => this.mention(voter)).join(", ")}`);
+    return `Vote leaderboard (${state.majorityRequired} needed):\n${rows.length ? rows.join("\n") : "No votes yet."}`;
   }
 
   private roster(): string {
