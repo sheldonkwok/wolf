@@ -20,7 +20,7 @@ export type SlackInput = {
   channel: string;
 } & ({ kind: "mention" | "dm"; text: string } | { kind: "choice"; value: string });
 
-const HELP = "In the game channel: `@werewolf join`, `leave`, `start`, `status`, `vote @player`, or `help`. The first player is host; only the host starts games. During the day, vote publicly with `@werewolf vote @player`. More than half of the living players must vote for the same player to eliminate them and begin night. Repeat the command to change your vote before a majority is reached. Use DM buttons for night actions. DM `status` to get your role and current night prompt again.";
+const HELP = "In the game channel: `@werewolf join`, `leave`, `start`, `end`, `status`, `vote @player`, or `help`. The first player is host; only the host starts or ends games. Use `@werewolf end` to cancel the game and open a fresh lobby. During the day, vote publicly with `@werewolf vote @player`. More than half of the living players must vote for the same player to eliminate them and begin night. Repeat the command to change your vote before a majority is reached. Use DM buttons for night actions. DM `status` to get your role and current night prompt again.";
 
 export class SlackGame {
   private readonly seen = new Set<string>();
@@ -93,6 +93,11 @@ export class SlackGame {
         this.advance();
         break;
       }
+      case "end":
+        this.lobby.cancelGame(user);
+        this.resetLobby();
+        this.publish(`<@${user}> ended the game. No winner was declared. A new lobby is open! Use \`@werewolf join\` to play again; the first player to join becomes host.`);
+        break;
       case "status":
         this.publish(this.status());
         break;
@@ -216,9 +221,7 @@ export class SlackGame {
     if (state.isOver) {
       this.publish(`${state.winner} win!\n${state.players.map(p => `${this.mention(p.id)}: ${p.role}`).join("\n")}\nA new lobby is open! Use \`@werewolf join\` to play again. The first player to join becomes host and can use \`@werewolf start\` once everyone is ready.`);
       this.lobby.endGame();
-      for (const { user } of [...this.lobby.members]) this.lobby.leave(user);
-      this.bots.clear();
-      this.prompt = "";
+      this.resetLobby();
       return;
     }
     if (state.phase === "Night") {
@@ -227,6 +230,12 @@ export class SlackGame {
     } else {
       this.publish(`Day ${state.round}. Discuss in <#${this.channel}> and vote with \`@werewolf vote @player\`. A player is eliminated as soon as ${state.majorityRequired} living players vote for them. You can change your vote until then.${this.dev ? " To target a dev bot, use its player number: @werewolf vote 3." : ""}\n${this.livingRoster()}`);
     }
+  }
+
+  private resetLobby(): void {
+    for (const { user } of [...this.lobby.members]) this.lobby.leave(user);
+    this.bots.clear();
+    this.prompt = "";
   }
 
   private promptActors(): void {
@@ -277,6 +286,16 @@ export class SlackGame {
       this.dm(user, `Night ${result.round} inspection: ${this.mention(result.target)} is ${result.isWerewolf ? "a Werewolf" : "innocent"}.`);
     }
     this.dm(user, this.status());
+    const state = this.lobby.game.state();
+    if (state.phase === "Night") {
+      const player = state.players.find(player => player.id === seat)!;
+      const progress = !player.alive || player.role === "Villager"
+        ? `You have no action to take on Night ${state.round}.`
+        : state.pendingActors.includes(seat)
+          ? `Your Night ${state.round} action is still needed. Choose using the buttons below.`
+          : `Your Night ${state.round} action is recorded. Waiting for the remaining night actions.`;
+      this.dm(user, progress);
+    }
     this.sendPrompt(user);
   }
 
@@ -284,7 +303,8 @@ export class SlackGame {
     const state = this.lobby.game?.state();
     if (!state) return this.roster();
     const votes = state.phase === "Day" ? `\nVotes (${state.majorityRequired} needed): ${state.votes.length ? state.votes.map(v => `${this.mention(v.voter)} → ${this.mention(v.target)}`).join(", ") : "none"}. Vote with \`@werewolf vote @player\`.` : "";
-    return `${state.phase} ${state.round}.\n${this.livingRoster()}${votes}`;
+    const night = state.phase === "Night" ? "\nNight ends automatically once all living players with night actions have submitted their choices. DM `status` to check your own action or get your buttons again." : "";
+    return `${state.phase} ${state.round}.\n${this.livingRoster()}${votes}${night}`;
   }
 
   private roster(): string {

@@ -75,6 +75,52 @@ test("channel boundary, host transfer, lobby minimum, and host-only start", () =
   expect(t.command("leave", "U2")[0]?.text).toContain("in progress");
 });
 
+test("only the host can end a game in the game channel", () => {
+  const t = table();
+  expect(t.command("end")[0]?.text).toContain("no game running");
+  t.command("start");
+  const game = t.lobby.game;
+  for (const user of ["U1", "OUTSIDER"]) {
+    expect(t.command("end", user)[0]).toMatchObject({ destination: "ephemeral", text: "Only the host can end the game." });
+  }
+  expect(t.command("end", "U0", "COTHER")).toEqual([]);
+  t.dm("U0", "end");
+  expect(t.lobby.game).toBe(game);
+  expect(t.command("end")[0]).toMatchObject({ destination: "channel" });
+  expect(t.lobby.game).toBeNull();
+  expect(t.lobby.isEmpty).toBe(true);
+  expect(t.lobby.host).toBeNull();
+  expect(t.vote(1, 2)[0]?.text).toContain("not in an active game");
+  t.command("join", "NEW_HOST");
+  expect(t.lobby.host?.user).toBe("NEW_HOST");
+});
+
+test("ending at night expires old buttons even after a restart", () => {
+  const t = table();
+  t.command("start");
+  reachNight(t);
+  const actor = t.lobby.game!.state().pendingActors[0]!;
+  const user = `U${actor}`;
+  const value = t.messages.findLast(m => m.user === user && m.choices)!.choices![0]!.value;
+  t.command("end");
+  expect(t.receive({ kind: "choice", user, channel: `D${user}`, value })[0]?.text).toContain("not in an active game");
+  for (let seat = 0; seat < 8; seat++) t.command("join", `U${seat}`);
+  t.command("start");
+  reachNight(t);
+  expect(t.receive({ kind: "choice", user, channel: `D${user}`, value })[0]?.text).toContain("expired");
+});
+
+test("ending a dev game clears bots for a fresh solo game", () => {
+  const t = table(1, 42n, true);
+  t.command("start");
+  t.command("end");
+  expect(t.lobby.isEmpty).toBe(true);
+  t.command("join");
+  const output = t.command("start");
+  expect(t.lobby.size).toBe(5);
+  expect(output.filter(m => m.destination === "dm").every(m => m.user === "U0")).toBe(true);
+});
+
 test("roles, pack, prompts, and night progress stay private", () => {
   const t = table();
   const output = t.command("start");
@@ -129,6 +175,60 @@ for (const count of [5, 8]) {
     expect(t.lobby.game!.state()).toEqual(before);
     morning(t);
     expect(t.lobby.game!.state().phase).toBe("Day");
+  });
+}
+
+for (const order of [
+  ["Werewolf", "Doctor", "Seer"], ["Werewolf", "Seer", "Doctor"],
+  ["Doctor", "Werewolf", "Seer"], ["Doctor", "Seer", "Werewolf"],
+  ["Seer", "Werewolf", "Doctor"], ["Seer", "Doctor", "Werewolf"],
+]) {
+  test(`night with a dead wolf resolves in order ${order.join(", ")} and status explains each player's action`, () => {
+    const t = table();
+    t.command("start");
+    const game = t.lobby.game!;
+    const deadWolf = game.state().players.find(p => p.role === "Werewolf")!.id;
+    eliminate(t, deadWolf);
+    const state = game.state();
+    expect(state.phase).toBe("Night");
+    expect(state.pendingActors).toHaveLength(3);
+    expect(state.pendingActors).not.toContain(deadWolf);
+    const target = state.players.find(p => p.role === "Villager")!.id;
+    const publicStatus = t.command("status");
+    expect(publicStatus[0]?.text).toContain("DM `status`");
+    for (const seat of [deadWolf, target]) {
+      const status = t.dm(`U${seat}`);
+      expect(status.some(m => m.text === "You have no action to take on Night 1.")).toBe(true);
+      expect(status.some(m => m.choices)).toBe(false);
+    }
+    for (const [index, role] of order.entries()) {
+      const actor = state.players.find(p => p.alive && p.role === role)!.id;
+      const before = game.state();
+      const status = t.dm(`U${actor}`);
+      expect(status.every(m => m.destination === "dm" && m.user === `U${actor}`)).toBe(true);
+      expect(status.some(m => m.text.includes("Your Night 1 action is still needed"))).toBe(true);
+      expect(status.some(m => m.choices)).toBe(true);
+      expect(game.state()).toEqual(before);
+      const result = t.choose(actor, target);
+      if (index < 2) {
+        expect(game.state().phase).toBe("Night");
+        expect(game.state().pendingActors).not.toContain(actor);
+        expect(result.every(m => m.destination === "dm" && m.user === `U${actor}`)).toBe(true);
+        const recorded = t.dm(`U${actor}`);
+        expect(recorded.some(m => m.text.includes("Your Night 1 action is recorded"))).toBe(true);
+        expect(recorded.some(m => m.choices)).toBe(false);
+        expect(t.command("status")).toEqual(publicStatus);
+      }
+    }
+    expect(game.state().phase).toBe("Day");
+    expect(game.state().round).toBe(2);
+    expect(game.isAlive(target)).toBe(true);
+    eliminate(t, target);
+    for (const actor of game.state().pendingActors) {
+      const status = t.dm(`U${actor}`);
+      expect(status.some(m => m.text.includes("Your Night 2 action is still needed"))).toBe(true);
+      expect(status.some(m => m.text.includes("action is recorded"))).toBe(false);
+    }
   });
 }
 

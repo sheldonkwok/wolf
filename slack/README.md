@@ -1,6 +1,6 @@
 # Wolf on Slack
 
-Wolf runs one game in the public `#werewolf` or `#werewolf-test` channel selected by `SLACK_CHANNEL_ID`. Each instance only handles commands in its configured channel. It uses the existing lobby and Rust engine through napi. The engine currently supports Werewolves and Villagers only; Doctor and Seer are not implemented.
+Wolf runs one game in the public `#werewolf` or `#werewolf-test` channel selected by `SLACK_CHANNEL_ID`. Each instance only handles commands in its configured channel. It uses the existing lobby and Rust engine through napi, with Werewolves, Villagers, a Doctor, and a Seer.
 
 ## Setup
 
@@ -44,6 +44,12 @@ Restart `bun run slackbot`, then send `@werewolf status` in your configured game
 Bun's built-in `undici` shim lacks the WebSocket `ping` export and heartbeat diagnostics used by Slack Socket Mode 3 ([upstream issue](https://github.com/oven-sh/bun/issues/37110)). This causes `Failed to send ping to Slack` errors and repeated reconnects.
 
 The repository declares `undici` directly and uses `patchedDependencies` to redirect Socket Mode 3.0.1's two runtime imports to `undici/index.js`, loading the installed package. `bun install` applies the patch automatically. After updating, run `bun install` and restart `bun run slackbot`. When upgrading Socket Mode, review the patch and run `bun test ts/slack-socket.test.ts` to check real heartbeat and message exchange against a local WebSocket server.
+
+## If night seems stuck
+
+Night ends automatically after every living Werewolf, Doctor, and Seer submits an action. Eliminated players and Villagers do not need to act. With one surviving Werewolf, a Doctor, and a Seer, all three must choose before dawn, even if one is the attack target.
+
+DM `status` to the bot to check your own action. It confirms whether your action is recorded or still needed, and resends buttons when you need to choose. Use the current night's buttons; older prompts expire. The channel's `@werewolf status` keeps individual night progress private. If the bot does not respond, check its terminal for delivery or connection errors. Keep the process running to preserve the active game.
 
 ## Play
 

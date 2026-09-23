@@ -212,6 +212,22 @@ test("joining and leaving are locked out while a game runs", () => {
   expect(grab(() => lobby.leave("u1")).code).toBe("GameInProgress");
 });
 
+test("only the host can cancel a running game, then restart", () => {
+  const lobby = lobbyWith(5);
+  expect(grab(() => lobby.cancelGame("u0")).code).toBe("NoGame");
+  const game = lobby.startWithSeed("u0", 1n);
+  for (const user of ["u1", "outsider"]) {
+    expect(grab(() => lobby.cancelGame(user)).code).toBe("NotHost");
+    expect(lobby.game).toBe(game);
+  }
+  lobby.cancelGame("u0");
+  expect(lobby.game).toBeNull();
+  expect(lobby.state).toBe("Waiting");
+  expect(lobby.size).toBe(5);
+  expect(grab(() => lobby.cancelGame("u0")).code).toBe("NoGame");
+  expect(lobby.startWithSeed("u0", 2n)).not.toBe(game);
+});
+
 // ----- endGame ---------------------------------------------------
 
 test("endGame needs a running game", () => {

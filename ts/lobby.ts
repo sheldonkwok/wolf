@@ -84,6 +84,13 @@ export class Lobby {
     return this.running;
   }
 
+  // Cancel a game at the host's request, keeping members intact.
+  cancelGame(host: UserId): void {
+    if (!this.isHost(host)) throw new LobbyError("NotHost", "Only the host can end the game.");
+    if (!this.running) throw new LobbyError("NoGame", "there is no game running");
+    this.running = null;
+  }
+
   // Clear a finished game and return to Waiting with the members intact.
   endGame(): void {
     if (!this.running) throw new LobbyError("NoGame", "there is no game running");
