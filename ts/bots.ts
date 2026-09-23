@@ -39,12 +39,7 @@ export function randomLivingOther(state: GameState, rng: Rng, exclude: number): 
 }
 
 // A villager bot's day vote: follow the human's lead 66% of the time, else at random.
-export function villagerBotVote(
-  state: GameState,
-  rng: Rng,
-  myVote: number | null,
-  bot: number,
-): number {
+export function villagerBotVote(state: GameState, rng: Rng, myVote: number | null, bot: number): number {
   if (myVote !== null && rng.chance(66)) return myVote;
   return randomLivingOther(state, rng, bot);
 }

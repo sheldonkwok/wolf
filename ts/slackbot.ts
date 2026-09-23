@@ -1,7 +1,7 @@
 import { App, type BlockAction, type ButtonAction } from "@slack/bolt";
+import manifest from "../slack/manifest.json";
 import { SlackDelivery } from "./slack/delivery.js";
 import { SlackGame, type SlackMessage } from "./slack/game.js";
-import manifest from "../slack/manifest.json";
 
 export function slackArgs(argv: string[]) {
   const args = { dev: false, help: false };
@@ -22,9 +22,13 @@ export function slackErrorMessage(error: unknown): string {
         return "Slack messages_tab_disabled: the app's Messages tab is disabled, blocking private game messages.\nIn the Slack app settings → App Home → Show Tabs, enable Messages Tab and allow users to send messages from that tab. Save changes. The repository manifest already enables these settings; apply them to the app used by SLACK_BOT_TOKEN. Keep this bot process running: queued messages retry every five seconds after the setting is fixed.\nSee slack/README.md.";
       }
       if (data.error === "missing_scope") {
-        const scopes = (value: unknown) => typeof value === "string"
-          ? value.split(",").filter(scope => /^[a-z_]+(?::[a-z_:]+)?$/.test(scope)).join(", ")
-          : "";
+        const scopes = (value: unknown) =>
+          typeof value === "string"
+            ? value
+                .split(",")
+                .filter((scope) => /^[a-z_]+(?::[a-z_:]+)?$/.test(scope))
+                .join(", ")
+            : "";
         const needed = scopes(data.needed);
         const provided = scopes(data.provided);
         const fix = needed.includes("connections:write")
@@ -41,7 +45,8 @@ export function slackErrorMessage(error: unknown): string {
 export function slackConfig(env: Record<string, string | undefined>) {
   const required = (name: string, pattern: RegExp): string => {
     const value = env[name]?.trim();
-    if (!value || !pattern.test(value)) throw new Error(`Set ${name} in .env (see .env.example and slack/README.md).`);
+    if (!value || !pattern.test(value))
+      throw new Error(`Set ${name} in .env (see .env.example and slack/README.md).`);
     return value;
   };
   return {
@@ -51,9 +56,20 @@ export function slackConfig(env: Record<string, string | undefined>) {
   };
 }
 
-export function slackChannel(channel?: { name?: string; is_member?: boolean; is_archived?: boolean }): string {
-  if (!channel?.name || !["werewolf", "werewolf-test"].includes(channel.name) || !channel.is_member || channel.is_archived) {
-    throw new Error("SLACK_CHANNEL_ID must identify #werewolf or #werewolf-test; invite the bot there and ensure the channel is not archived.");
+export function slackChannel(channel?: {
+  name?: string;
+  is_member?: boolean;
+  is_archived?: boolean;
+}): string {
+  if (
+    !channel?.name ||
+    !["werewolf", "werewolf-test"].includes(channel.name) ||
+    !channel.is_member ||
+    channel.is_archived
+  ) {
+    throw new Error(
+      "SLACK_CHANNEL_ID must identify #werewolf or #werewolf-test; invite the bot there and ensure the channel is not archived.",
+    );
   }
   return channel.name;
 }
@@ -77,14 +93,16 @@ export function messageBlocks(message: SlackMessage) {
 async function main(): Promise<void> {
   const args = slackArgs(process.argv.slice(2));
   if (args.help) {
-    console.log("Usage: bun run slackbot [--dev]\n\n--dev  Fill games to five players with bots; vote in the channel by mention or bot player number.\n--help Show this help.");
+    console.log(
+      "Usage: bun run slackbot [--dev]\n\n--dev  Fill games to five players with bots; vote in the channel by mention or bot player number.\n--help Show this help.",
+    );
     return;
   }
   const config = slackConfig(process.env);
   const app = new App({ token: config.token, appToken: config.appToken, socketMode: true });
   const [auth, conversation] = await Promise.all([
     app.client.auth.test(),
-    app.client.conversations.info({ channel: config.channel }).catch(error => {
+    app.client.conversations.info({ channel: config.channel }).catch((error) => {
       throw new Error(`Checking configured game channel (conversations.info): ${slackErrorMessage(error)}`);
     }),
   ]);
@@ -92,26 +110,37 @@ async function main(): Promise<void> {
   const channelName = slackChannel(conversation.channel);
 
   const dms = new Map<string, string>();
-  const delivery = new SlackDelivery(new SlackGame(config.channel, undefined, args), async message => {
-    let channel = config.channel;
-    if (message.destination === "dm") {
-      const user = message.user!;
-      let dm = dms.get(user);
-      if (!dm) {
-        dm = (await app.client.conversations.open({ users: user })).channel?.id;
-        if (!dm) throw new Error("Slack did not return a DM channel.");
-        dms.set(user, dm);
+  const delivery = new SlackDelivery(
+    new SlackGame(config.channel, undefined, args),
+    async (message) => {
+      let channel = config.channel;
+      if (message.destination === "dm") {
+        const user = message.user!;
+        let dm = dms.get(user);
+        if (!dm) {
+          dm = (await app.client.conversations.open({ users: user })).channel?.id;
+          if (!dm) throw new Error("Slack did not return a DM channel.");
+          dms.set(user, dm);
+        }
+        channel = dm;
       }
-      channel = dm;
-    }
-    const payload = { channel, text: message.text, blocks: messageBlocks(message), unfurl_links: false, unfurl_media: false };
-    if (message.destination === "ephemeral") {
-      await app.client.chat.postEphemeral({ ...payload, user: message.user! });
-    } else {
-      await app.client.chat.postMessage(payload);
-    }
-    console.log(`Slack reply sent (${message.destination}).`);
-  }, error => console.error(`Slack delivery failed; queued messages will retry. ${slackErrorMessage(error)}`));
+      const payload = {
+        channel,
+        text: message.text,
+        blocks: messageBlocks(message),
+        unfurl_links: false,
+        unfurl_media: false,
+      };
+      if (message.destination === "ephemeral") {
+        await app.client.chat.postEphemeral({ ...payload, user: message.user! });
+      } else {
+        await app.client.chat.postMessage(payload);
+      }
+      console.log(`Slack reply sent (${message.destination}).`);
+    },
+    (error) =>
+      console.error(`Slack delivery failed; queued messages will retry. ${slackErrorMessage(error)}`),
+  );
 
   app.event("app_mention", async ({ event, body }) => {
     console.log("Slack app_mention received.");
@@ -133,12 +162,32 @@ async function main(): Promise<void> {
       console.log("Slack mention ignored: the message must start with a mention of this bot.");
       return;
     }
-    await delivery.receive({ id: body.event_id, kind: "mention", user: event.user, channel: event.channel, text: text.slice(mention.length) });
+    await delivery.receive({
+      id: body.event_id,
+      kind: "mention",
+      user: event.user,
+      channel: event.channel,
+      text: text.slice(mention.length),
+    });
   });
 
   app.event("message", async ({ event, body }) => {
-    if (body.team_id !== auth.team_id || event.subtype || !("user" in event) || !event.user || event.user === auth.user_id || event.channel_type !== "im") return;
-    await delivery.receive({ id: body.event_id, kind: "dm", user: event.user, channel: event.channel, text: event.text ?? "" });
+    if (
+      body.team_id !== auth.team_id ||
+      event.subtype ||
+      !("user" in event) ||
+      !event.user ||
+      event.user === auth.user_id ||
+      event.channel_type !== "im"
+    )
+      return;
+    await delivery.receive({
+      id: body.event_id,
+      kind: "dm",
+      user: event.user,
+      channel: event.channel,
+      text: event.text ?? "",
+    });
   });
 
   app.action<BlockAction<ButtonAction>>(/^wolf_choice_\d+$/, async ({ ack, body, action }) => {
@@ -146,11 +195,14 @@ async function main(): Promise<void> {
     if (body.team?.id !== auth.team_id || !body.channel?.id.startsWith("D") || !action.value) return;
     await delivery.receive({
       id: `action:${body.user.id}:${action.action_ts}:${action.action_id}`,
-      kind: "choice", user: body.user.id, channel: body.channel.id, value: action.value,
+      kind: "choice",
+      user: body.user.id,
+      channel: body.channel.id,
+      value: action.value,
     });
   });
 
-  app.error(async error => console.error(`Slack event handling failed. ${slackErrorMessage(error)}`));
+  app.error(async (error) => console.error(`Slack event handling failed. ${slackErrorMessage(error)}`));
   await app.start();
   const retry = setInterval(() => void delivery.retry(), 5_000);
   const stop = async () => {
@@ -159,13 +211,18 @@ async function main(): Promise<void> {
   };
   process.once("SIGINT", () => void stop());
   process.once("SIGTERM", () => void stop());
-  console.log(`Wolf is connected to #${channelName} (${config.channel}) as ${auth.user ?? "Wolf"} (${auth.user_id}). Mention the bot with help to begin.`);
-  if (args.dev) console.log("Dev mode enabled: games fill to five players with bots. Join and start to play solo.");
-  console.log("Waiting for app_mention events. If mentions produce no log, check Event Subscriptions → Enable Events and Subscribe to bot events → app_mention in the Slack app settings.");
+  console.log(
+    `Wolf is connected to #${channelName} (${config.channel}) as ${auth.user ?? "Wolf"} (${auth.user_id}). Mention the bot with help to begin.`,
+  );
+  if (args.dev)
+    console.log("Dev mode enabled: games fill to five players with bots. Join and start to play solo.");
+  console.log(
+    "Waiting for app_mention events. If mentions produce no log, check Event Subscriptions → Enable Events and Subscribe to bot events → app_mention in the Slack app settings.",
+  );
 }
 
 if (import.meta.main) {
-  main().catch(error => {
+  main().catch((error) => {
     console.error(slackErrorMessage(error));
     process.exitCode = 1;
   });

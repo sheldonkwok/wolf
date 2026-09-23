@@ -4,7 +4,7 @@
 
 import { expect, test } from "bun:test";
 
-import { type Game } from "./engine.js";
+import type { Game } from "./engine.js";
 import { Lobby, LobbyError } from "./lobby.js";
 
 // ----- helpers -----------------------------------------------------------
@@ -37,14 +37,14 @@ function playOut(game: Game): void {
       const victim = s.players.find((p) => p.alive && p.role !== "Werewolf")!.id;
       const wolves = s.players.filter((p) => p.alive && p.role === "Werewolf").map((p) => p.id);
       for (const wolf of wolves) game.nightAction(wolf, victim);
-      for (const player of s.players.filter(p => p.alive)) {
+      for (const player of s.players.filter((p) => p.alive)) {
         if (player.role === "Doctor") game.doctorAction(player.id, wolves[0]!);
         if (player.role === "Seer") game.seerAction(player.id, wolves[0]!);
       }
       expect(game.resolveNight().kind).toBe("Killed");
     } else {
       const living = s.players.filter((p) => p.alive).map((p) => p.id);
-      const target = s.players.find(p => p.alive && p.role === "Werewolf")!.id;
+      const target = s.players.find((p) => p.alive && p.role === "Werewolf")!.id;
       for (const voter of living) game.vote(voter, target);
       expect(game.resolveDay().kind).toBe("Eliminated");
     }

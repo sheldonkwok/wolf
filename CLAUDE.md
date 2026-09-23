@@ -44,3 +44,6 @@ Play a game with `bun run cli -- --seed 42 --players 7 --reveal`.
 
 ## Style
 Comments can be maximum one line
+Use `bun run format` to format TypeScript and `bun run lint` to lint it; `bun run check` verifies both.
+Biome uses two-space indentation and a 110-column line width, excluding generated `ts/native/` bindings.
+Non-null assertions are allowed for the existing checked indexing and game-state patterns.

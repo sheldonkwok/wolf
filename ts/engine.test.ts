@@ -1,18 +1,12 @@
 // Exercise the public wrapper against the native engine and malformed boundary results.
 
 import { expect, spyOn, test } from "bun:test";
+import { Game, GameError, Rng, timeSeed } from "./engine.js";
 import { Game as NativeGame } from "./native/index.js";
 
-import {
-  Game,
-  GameError,
-  Rng,
-  timeSeed,
-} from "./engine.js";
-
 function reachNight(game: Game): void {
-  const players = game.state().players.filter(p => p.alive);
-  const target = players.findLast(p => p.role === "Villager")!.id;
+  const players = game.state().players.filter((p) => p.alive);
+  const target = players.findLast((p) => p.role === "Villager")!.id;
   for (const player of players) game.vote(player.id, target);
   expect(game.resolveDay()).toEqual({ kind: "Eliminated", eliminated: target });
   expect(game.state().phase).toBe("Night");
@@ -26,10 +20,10 @@ test("withSeed is reproducible and matches the Rust deal", () => {
   expect(a).toEqual(b);
   expect(a.phase).toBe("Day");
   expect(a.round).toBe(1);
-  expect(a.players.every(p => p.alive)).toBe(true);
+  expect(a.players.every((p) => p.alive)).toBe(true);
   expect(a.majorityRequired).toBe(4);
   expect(a.majorityTarget).toBeUndefined();
-  expect(a.pendingActors).toEqual(a.players.map(p => p.id));
+  expect(a.pendingActors).toEqual(a.players.map((p) => p.id));
   expect(a.players.filter((p) => p.role === "Werewolf").map((p) => p.id)).toEqual([5]);
 });
 
@@ -61,7 +55,7 @@ test("Day 1 accepts votes and can end in a villager win before night", () => {
   expect(end.isOver).toBe(true);
   expect(end.winner).toBe("Villagers");
   expect(end.round).toBe(1);
-  expect(end.players.filter(p => p.alive).length).toBe(4);
+  expect(end.players.filter((p) => p.alive).length).toBe(4);
 });
 
 test("a split pack resolves to NoConsensus and stays in Night", () => {
@@ -86,7 +80,15 @@ test("a lone wolf cannot target itself and a rejected pick leaves state unchange
 });
 
 test("majority crosses the binding and votes clear after resolution", () => {
-  const game = Game.withRoles(["Werewolf", "Villager", "Villager", "Villager", "Villager", "Villager", "Villager"]);
+  const game = Game.withRoles([
+    "Werewolf",
+    "Villager",
+    "Villager",
+    "Villager",
+    "Villager",
+    "Villager",
+    "Villager",
+  ]);
   expect(game.state().majorityRequired).toBe(4);
   for (const voter of [0, 1, 2]) game.vote(voter, 6);
   const before = game.state();
@@ -143,9 +145,11 @@ test("too few players throws TooFewPlayers", () => {
 });
 
 test("all constructors produce usable wrapper instances", () => {
-  for (const game of [new Game(5), Game.withSeed(5, 1n), Game.withRoles([
-    "Werewolf", "Villager", "Villager", "Villager", "Villager",
-  ])]) {
+  for (const game of [
+    new Game(5),
+    Game.withSeed(5, 1n),
+    Game.withRoles(["Werewolf", "Villager", "Villager", "Villager", "Villager"]),
+  ]) {
     expect(game).toBeInstanceOf(Game);
     expect(game.state().players).toHaveLength(5);
     expect(game.isAlive(0)).toBe(true);
@@ -177,11 +181,13 @@ test("error conversion validates tags and preserves typed errors", () => {
   const error = new GameError("UnknownPlayer", "no such player: P99");
   expect(GameError.fromThrown(error)).toBe(error);
   expect(GameError.fromThrown(new Error("UnknownPlayer: no such player: P99"))).toMatchObject({
-    code: "UnknownPlayer", message: "no such player: P99",
+    code: "UnknownPlayer",
+    message: "no such player: P99",
   });
   for (const thrown of [new Error("Unexpected: detail"), "plain failure", null]) {
     expect(GameError.fromThrown(thrown)).toMatchObject({
-      code: "Unknown", message: thrown instanceof Error ? thrown.message : String(thrown),
+      code: "Unknown",
+      message: thrown instanceof Error ? thrown.message : String(thrown),
     });
   }
 });
@@ -249,6 +255,6 @@ test("special roles cross the binding with final actions, private results, and a
   expect(grab(() => game.doctorAction(0, 3)).code).toBe("AlreadyActed");
   expect(game.resolveNight()).toEqual({ kind: "Saved", saved: 0 });
   expect(game.state().doctorPicks).toEqual([]);
-  expect(game.state().players.filter(p => p.alive).length).toBe(4);
+  expect(game.state().players.filter((p) => p.alive).length).toBe(4);
   expect(game.state().round).toBe(2);
 });

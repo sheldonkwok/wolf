@@ -4,12 +4,18 @@
 import { expect, test } from "bun:test";
 
 import { pick, randomLivingOther, randomLivingVillager, villagerBotVote } from "./bots.js";
-import { Game, Rng, type GameState } from "./engine.js";
+import { Game, type GameState, Rng } from "./engine.js";
 
 // Wolves at seats 0 and 5, villagers elsewhere — no one eliminated.
 function roster(): GameState {
   return Game.withRoles([
-    "Werewolf", "Villager", "Villager", "Villager", "Villager", "Werewolf", "Villager",
+    "Werewolf",
+    "Villager",
+    "Villager",
+    "Villager",
+    "Villager",
+    "Werewolf",
+    "Villager",
   ]).state();
 }
 

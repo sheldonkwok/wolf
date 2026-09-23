@@ -5,8 +5,22 @@ import type { GameState, Role } from "./engine.js";
 
 // Friendly seat names; seats past the table fall back to `P{n}`.
 export const NAMES = [
-  "Alice", "Bob", "Cass", "Dev", "Eve", "Finn", "Gwen", "Hugo",
-  "Iris", "Jack", "Kira", "Leo", "Mona", "Nia", "Otto", "Pip",
+  "Alice",
+  "Bob",
+  "Cass",
+  "Dev",
+  "Eve",
+  "Finn",
+  "Gwen",
+  "Hugo",
+  "Iris",
+  "Jack",
+  "Kira",
+  "Leo",
+  "Mona",
+  "Nia",
+  "Otto",
+  "Pip",
 ] as const;
 
 export function nameOf(id: number): string {

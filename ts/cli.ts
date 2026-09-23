@@ -2,15 +2,15 @@
 // engine by hand. The engine and PRNG are the Rust addon; everything else is here.
 
 import {
+  isWolf,
   livingIds,
+  livingWolves,
   pick,
   randomLivingOther,
-  livingWolves,
-  isWolf,
   randomLivingVillager,
   villagerBotVote,
 } from "./bots.js";
-import { Game, Rng, timeSeed, type GameState } from "./engine.js";
+import { Game, type GameState, Rng, timeSeed } from "./engine.js";
 import { banner, nameOf, printRoster, roleTag } from "./render.js";
 
 // Matches wolf::Engine::MIN_PLAYERS.
@@ -60,8 +60,7 @@ function parseArgs(argv: string[]): Args {
       case "-h":
       case "--help":
         console.log(HELP);
-        process.exit(0);
-      // eslint-disable-next-line no-fallthrough
+        return process.exit(0);
       case "--reveal":
         args.reveal = true;
         break;
@@ -123,10 +122,11 @@ class LineReader {
         continue;
       }
       this.buf += this.decoder.decode(chunk.value, { stream: true });
-      let nl: number;
-      while ((nl = this.buf.indexOf("\n")) >= 0) {
+      let nl = this.buf.indexOf("\n");
+      while (nl >= 0) {
         this.queue.push(this.buf.slice(0, nl));
         this.buf = this.buf.slice(nl + 1);
+        nl = this.buf.indexOf("\n");
       }
     }
   }
@@ -222,18 +222,24 @@ class Table {
       let chosen: number;
       if (actor === this.me) {
         const picked = await this.promptPlayer(
-          role === "Doctor" ? "Doctor, choose someone to protect (you may choose yourself)." : "Seer, choose someone to inspect.",
+          role === "Doctor"
+            ? "Doctor, choose someone to protect (you may choose yourself)."
+            : "Seer, choose someone to inspect.",
           livingIds(this.state()),
         );
         if (picked === null) return false;
         chosen = picked;
       } else {
-        chosen = role === "Doctor" ? pick(this.rng, livingIds(this.state())) : randomLivingOther(this.state(), this.rng, actor);
+        chosen =
+          role === "Doctor"
+            ? pick(this.rng, livingIds(this.state()))
+            : randomLivingOther(this.state(), this.rng, actor);
       }
       if (role === "Doctor") this.game.doctorAction(actor, chosen);
       else {
         const result = this.game.seerAction(actor, chosen);
-        if (actor === this.me) console.log(`${nameOf(chosen)} is ${result.isWerewolf ? "a Werewolf" : "innocent"}.`);
+        if (actor === this.me)
+          console.log(`${nameOf(chosen)} is ${result.isWerewolf ? "a Werewolf" : "innocent"}.`);
       }
     }
 
@@ -261,7 +267,11 @@ class Table {
   private async runDay(): Promise<boolean> {
     this.drawBanner(`Day ${this.state().round}`);
 
-    console.log(this.state().round === 1 ? "The game begins. Discuss who you suspect before voting." : "Sun rises, everyone wake up!");
+    console.log(
+      this.state().round === 1
+        ? "The game begins. Discuss who you suspect before voting."
+        : "Sun rises, everyone wake up!",
+    );
     if (this.nightVictim !== null) {
       const victim = this.nightVictim;
       this.nightVictim = null;
@@ -278,7 +288,9 @@ class Table {
     const alive = livingIds(this.state()).map(nameOf);
     console.log(`Alive: ${alive.join(", ")}`);
 
-    console.log(`${this.state().majorityRequired} votes for one player are needed. Votes can change until then.`);
+    console.log(
+      `${this.state().majorityRequired} votes for one player are needed. Votes can change until then.`,
+    );
     while (this.state().majorityTarget == null) {
       let myVote: number | null = null;
       if (this.iAmAlive()) {
@@ -288,17 +300,23 @@ class Table {
         this.game.vote(this.me, picked);
         console.log(`${nameOf(this.me)} → ${nameOf(picked)}`);
       }
-      const wolfTarget = this.iAmAlive() && this.iAmWolf() ? myVote! : randomLivingVillager(this.state(), this.rng);
-      for (const id of livingIds(this.state()).filter(id => id !== this.me)) {
+      const wolfTarget =
+        this.iAmAlive() && this.iAmWolf() ? myVote! : randomLivingVillager(this.state(), this.rng);
+      for (const id of livingIds(this.state()).filter((id) => id !== this.me)) {
         if (this.state().majorityTarget != null) break;
-        const target = !this.iAmAlive() || isWolf(this.state(), id) ? wolfTarget : villagerBotVote(this.state(), this.rng, myVote, id);
+        const target =
+          !this.iAmAlive() || isWolf(this.state(), id)
+            ? wolfTarget
+            : villagerBotVote(this.state(), this.rng, myVote, id);
         this.game.vote(id, target);
         console.log(`${nameOf(id)} → ${nameOf(target)}`);
       }
       if (this.state().majorityTarget == null) console.log("No majority yet. Discuss and vote again.");
     }
     const outcome = this.game.resolveDay();
-    console.log(`${nameOf(outcome.eliminated)} was eliminated. (${roleTag(this.game.roleOf(outcome.eliminated))})`);
+    console.log(
+      `${nameOf(outcome.eliminated)} was eliminated. (${roleTag(this.game.roleOf(outcome.eliminated))})`,
+    );
 
     if (!this.iAmAlive()) await this.waitForEnter();
     return true;
@@ -306,9 +324,7 @@ class Table {
 
   async run(seed: bigint, players: number): Promise<void> {
     const myRole = this.game.roleOf(this.me);
-    console.log(
-      `Seed ${seed} · ${players} players · you are ${nameOf(this.me)} (${roleTag(myRole)})`,
-    );
+    console.log(`Seed ${seed} · ${players} players · you are ${nameOf(this.me)} (${roleTag(myRole)})`);
     if (myRole === "Werewolf") {
       const pack = this.state()
         .players.filter((p) => p.role === "Werewolf")

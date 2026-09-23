@@ -1,21 +1,21 @@
 // Typed game API over the native addon; error conversion and result validation stay here.
 
 import {
-  Game as NativeGame,
-  Rng,
-  timeSeed,
   type DayResult,
   type GameState,
   type InspectionView,
+  Game as NativeGame,
   type NightResult,
   type PlayerView,
+  Rng,
   type Role,
+  timeSeed,
   type VoteView,
   type Winner,
 } from "./native/index.js";
 
+export type { GameState, InspectionView, PlayerView, Role, VoteView, Winner };
 export { Rng, timeSeed };
-export type { InspectionView, GameState, PlayerView, Role, VoteView, Winner };
 
 // Stable tags mirrored from wolf::GameError::code in the engine crate.
 const GAME_ERROR_CODES = [
@@ -35,7 +35,7 @@ const GAME_ERROR_CODES = [
   "Unknown",
 ] as const;
 
-export type GameErrorCode = typeof GAME_ERROR_CODES[number];
+export type GameErrorCode = (typeof GAME_ERROR_CODES)[number];
 
 // The addon throws `Error("<Code>: <message>")`; this splits it back apart.
 export class GameError extends Error {
@@ -52,7 +52,7 @@ export class GameError extends Error {
     const raw = thrown instanceof Error ? thrown.message : String(thrown);
     const split = raw.indexOf(": ");
     if (split > 0) {
-      const code = GAME_ERROR_CODES.find(code => code === raw.slice(0, split));
+      const code = GAME_ERROR_CODES.find((code) => code === raw.slice(0, split));
       if (code) return new GameError(code, raw.slice(split + 2));
     }
     return new GameError("Unknown", raw);
@@ -73,8 +73,7 @@ export type NightResolution =
   | { kind: "Saved"; saved: number }
   | { kind: "NoConsensus"; targets: number[] };
 
-export type DayResolution =
-  { kind: "Eliminated"; eliminated: number };
+export type DayResolution = { kind: "Eliminated"; eliminated: number };
 
 function isSeat(value: unknown): value is number {
   return typeof value === "number" && Number.isSafeInteger(value) && value >= 0;

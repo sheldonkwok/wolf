@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 import { channel } from "node:diagnostics_channel";
-import { EventEmitter } from "eventemitter3";
 import { SlackWebSocket } from "@slack/socket-mode/dist/src/SlackWebSocket.js";
+import { EventEmitter } from "eventemitter3";
 
 test("Slack's transport exchanges heartbeats and messages under Bun", async () => {
   let clientPings = 0;
@@ -9,8 +9,12 @@ test("Slack's transport exchanges heartbeats and messages under Bun", async () =
   let serverPongs = 0;
   const pingChannel = channel("undici:websocket:ping");
   const pongChannel = channel("undici:websocket:pong");
-  const onPing = () => { serverPings++; };
-  const onPong = () => { serverPongs++; };
+  const onPing = () => {
+    serverPings++;
+  };
+  const onPong = () => {
+    serverPongs++;
+  };
   const server = Bun.serve({
     hostname: "127.0.0.1",
     port: 0,
@@ -18,12 +22,16 @@ test("Slack's transport exchanges heartbeats and messages under Bun", async () =
       if (!server.upgrade(request)) return new Response("WebSocket required", { status: 400 });
     },
     websocket: {
-      open(ws) { ws.ping("server heartbeat"); },
+      open(ws) {
+        ws.ping("server heartbeat");
+      },
       ping(ws) {
         clientPings++;
         if (clientPings >= 5) ws.send("healthy");
       },
-      message(ws, message) { ws.send(message); },
+      message(ws, message) {
+        ws.send(message);
+      },
     },
   });
   const client = new EventEmitter();
@@ -40,7 +48,10 @@ test("Slack's transport exchanges heartbeats and messages under Bun", async () =
     client.on("error", reject);
     client.on("close", () => reject(new Error("Slack transport closed during heartbeat exchange")));
     client.on("ws_message", (message: string) => {
-      if (message === "healthy") socket.send("echo", error => { if (error) reject(error); });
+      if (message === "healthy")
+        socket.send("echo", (error) => {
+          if (error) reject(error);
+        });
       if (message === "echo") resolve();
     });
   });
