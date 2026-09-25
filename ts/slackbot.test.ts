@@ -1,4 +1,6 @@
 import { expect, test } from "bun:test";
+import { type FinishedGame, openStats } from "./db/index.js";
+import { gamePlayers, games } from "./db/schema.js";
 import { Lobby } from "./lobby.js";
 import { SlackDelivery } from "./slack/delivery.js";
 import { SlackGame, type SlackInput, type SlackMessage } from "./slack/game.js";
@@ -13,9 +15,9 @@ class SeededLobby extends Lobby {
   }
 }
 
-function table(count = 8, seed = 42n, dev = false) {
+function table(count = 8, seed = 42n, dev = false, recordResult?: (result: FinishedGame) => void) {
   const lobby = new SeededLobby(seed);
-  const bot = new SlackGame("CGAME", lobby, { dev, seed });
+  const bot = new SlackGame("CGAME", lobby, { dev, seed, recordResult });
   let sequence = 0;
   const messages: SlackMessage[] = [];
   const receive = (input: Omit<SlackInput, "id"> & { text?: string; value?: string }) => {
@@ -543,6 +545,97 @@ test("werewolf victory opens a fresh lobby with a new host", () => {
   expect(t.lobby.game!.state().round).toBe(1);
 });
 
+for (const winner of ["Villagers", "Werewolves"] as const) {
+  test(`completed ${winner} wins persist the original roster, including eliminated players`, () => {
+    const stats = openStats(":memory:");
+    try {
+      const t = table(5, 42n, false, (result) => stats.record("TWORKSPACE", result));
+      t.command("start");
+      const players = t.lobby.game!.state().players;
+      t.bot.saveResults();
+      expect(stats.db.select().from(games).all()).toEqual([]);
+      if (winner === "Werewolves") reachNight(t);
+      else eliminate(t, players.find((p) => p.role === "Werewolf")!.id);
+      if (winner === "Werewolves") {
+        morning(t);
+        eliminate(t, t.lobby.game!.state().players.find((p) => p.alive && p.role !== "Werewolf")!.id);
+      }
+      expect(t.lobby.isEmpty).toBe(true);
+      t.bot.saveResults();
+      t.bot.saveResults();
+      const saved = stats.db.select().from(games).all();
+      expect(saved).toHaveLength(1);
+      expect(saved[0]).toMatchObject({ workspaceId: "TWORKSPACE", channelId: "CGAME", winner, dev: false });
+      expect(saved[0]!.finishedAt.getTime()).toBeGreaterThanOrEqual(saved[0]!.startedAt.getTime());
+      expect(stats.db.select().from(gamePlayers).orderBy(gamePlayers.seat).all()).toEqual(
+        players.map((p) => ({
+          gameId: saved[0]!.id,
+          seat: p.id,
+          userId: `U${p.id}`,
+          role: p.role,
+          isBot: false,
+        })),
+      );
+      for (let seat = 0; seat < 5; seat++) t.command("join", `U${seat}`);
+      t.command("start");
+      eliminate(t, t.lobby.game!.state().players.find((p) => p.role === "Werewolf")!.id);
+      t.bot.saveResults();
+      expect(stats.db.select().from(games).all()).toHaveLength(2);
+    } finally {
+      stats.close();
+    }
+  });
+}
+
+test("cancelled games produce no stats", () => {
+  const results: FinishedGame[] = [];
+  const t = table(5, 42n, false, (result) => results.push(result));
+  t.command("start");
+  t.command("end");
+  t.bot.saveResults();
+  expect(results).toEqual([]);
+});
+
+test("failed stats writes retry before win messages without replaying the final vote", async () => {
+  const results: FinishedGame[] = [];
+  let failing = true;
+  let failures = 0;
+  const t = table(5, 42n, false, (result) => {
+    if (failing) throw new Error("Database unavailable");
+    results.push(result);
+  });
+  t.command("start");
+  const wolf = t.lobby.game!.state().players.find((p) => p.role === "Werewolf")!.id;
+  t.vote(0, wolf);
+  t.vote(1, wolf);
+  const sent: SlackMessage[] = [];
+  const delivery = new SlackDelivery(
+    t.bot,
+    async (message) => {
+      sent.push(message);
+    },
+    () => {
+      failures++;
+    },
+  );
+  const input: SlackInput = {
+    id: "final-vote",
+    kind: "mention",
+    user: "U2",
+    channel: "CGAME",
+    text: `vote <@U${wolf}>`,
+  };
+  await delivery.receive(input);
+  expect(t.lobby.isEmpty).toBe(true);
+  expect(failures).toBe(1);
+  expect(sent).toEqual([]);
+  failing = false;
+  await delivery.retry();
+  await delivery.receive(input);
+  expect(results).toHaveLength(1);
+  expect(sent.filter((m) => m.text.startsWith("Villagers win!"))).toHaveLength(1);
+});
+
 test("configuration requires tokens and a public channel ID without exposing secrets", () => {
   expect(() => slackConfig({})).toThrow("SLACK_BOT_TOKEN");
   const env = { SLACK_BOT_TOKEN: "xoxb-secret", SLACK_APP_TOKEN: "xapp-secret", SLACK_CHANNEL_ID: "CGAME" };
@@ -586,7 +679,8 @@ test("dev games fill with bots, wait for humans, finish after elimination, and c
   let eliminatedHumans = 0;
   for (const humans of [1, 2, 4, 5]) {
     for (let seed = 0n; seed < 30n; seed++) {
-      const t = table(humans, seed, true);
+      const results: FinishedGame[] = [];
+      const t = table(humans, seed, true, (result) => results.push(result));
       const start = t.command("start");
       expect(start[0]?.text).toContain("started with 5 players");
       expect(t.lobby.game!.state().phase).toBe("Day");
@@ -633,6 +727,14 @@ test("dev games fill with bots, wait for humans, finish after elimination, and c
         ),
       ).toBe(true);
       expect(t.messages.every((m) => !m.text.includes("<@bot-"))).toBe(true);
+      t.bot.saveResults();
+      expect(results).toHaveLength(1);
+      expect(results[0]!.dev).toBe(true);
+      expect(results[0]!.players).toHaveLength(5);
+      expect(results[0]!.players.filter((p) => p.isBot)).toHaveLength(5 - humans);
+      expect(results[0]!.players.filter((p) => !p.isBot).map((p) => p.userId)).toEqual(
+        Array.from({ length: humans }, (_, seat) => `U${seat}`),
+      );
       expect(t.lobby.members).toEqual([]);
       expect(t.lobby.host).toBeNull();
       for (let seat = 0; seat < humans; seat++) t.command("join", `U${seat}`);

@@ -1,5 +1,6 @@
 import { App, type BlockAction, type ButtonAction } from "@slack/bolt";
 import manifest from "../slack/manifest.json";
+import { openStats } from "./db/index.js";
 import { SlackDelivery } from "./slack/delivery.js";
 import { SlackGame, type SlackMessage } from "./slack/game.js";
 
@@ -108,10 +109,14 @@ async function main(): Promise<void> {
   ]);
   if (!auth.user_id || !auth.team_id) throw new Error("Slack did not identify the bot or workspace.");
   const channelName = slackChannel(conversation.channel);
+  const stats = openStats();
 
   const dms = new Map<string, string>();
   const delivery = new SlackDelivery(
-    new SlackGame(config.channel, undefined, args),
+    new SlackGame(config.channel, undefined, {
+      ...args,
+      recordResult: (result) => stats.record(auth.team_id!, result),
+    }),
     async (message) => {
       let channel = config.channel;
       if (message.destination === "dm") {
@@ -203,11 +208,18 @@ async function main(): Promise<void> {
   });
 
   app.error(async (error) => console.error(`Slack event handling failed. ${slackErrorMessage(error)}`));
-  await app.start();
+  try {
+    await app.start();
+  } catch (error) {
+    stats.close();
+    throw error;
+  }
   const retry = setInterval(() => void delivery.retry(), 5_000);
   const stop = async () => {
     clearInterval(retry);
     await app.stop();
+    await delivery.retry();
+    stats.close();
   };
   process.once("SIGINT", () => void stop());
   process.once("SIGTERM", () => void stop());

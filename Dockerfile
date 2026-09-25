@@ -17,7 +17,7 @@ RUN bun run --bun build -- -- --locked
 
 FROM debian:bookworm-slim AS base
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends ca-certificates libgcc-s1 libstdc++6 \
+    && apt-get install -y --no-install-recommends ca-certificates gosu libgcc-s1 libstdc++6 \
     && rm -rf /var/lib/apt/lists/* \
     && useradd --create-home --uid 1000 bun
 COPY --from=bun /usr/local/bin/bun /usr/local/bin/bun
@@ -30,10 +30,13 @@ RUN bun install --frozen-lockfile --production
 
 FROM base AS runtime
 ENV NODE_ENV=production
+ENV DATABASE_PATH=/data/wolf.sqlite
 COPY package.json ./
 COPY --from=dependencies /app/node_modules ./node_modules/
 COPY ts/ ./ts/
 COPY --from=build /app/ts/native ./ts/native/
 COPY slack/manifest.json ./slack/manifest.json
-USER bun
+COPY drizzle/ ./drizzle/
+COPY --chmod=755 docker-entrypoint.sh /usr/local/bin/wolf-entrypoint
+ENTRYPOINT ["wolf-entrypoint"]
 CMD ["bun", "ts/slackbot.ts"]

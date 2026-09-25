@@ -68,6 +68,24 @@ For solo testing, run `bun run slackbot -- --dev`, then use `@werewolf join` and
 
 Game commands from other channels are ignored. Night choices, pack membership, and pending actor identities stay private. Stale buttons, duplicate event deliveries, outsiders, eliminated players, and duplicate votes cannot advance the game incorrectly. Target legality and outcomes are decided by the Rust engine, including its allowance for self-targets.
 
+## Game stats
+
+Completed Slack games are saved to SQLite using Drizzle and Bun's SQLite driver. `games` stores a UUID, workspace/channel IDs, start/end timestamps, winning team, and dev-mode flag. `game_players` stores every original player's Slack user ID, seat, role, and bot flag, including eliminated players. Doctor and Seer wins belong to the Villagers team. Dev games are recorded with `dev = 1`; filter them out for normal stats. Cancelled games, interrupted games, and CLI games are not recorded. There is no stats command yet.
+
+Locally, `DATABASE_PATH` defaults to `./data/wolf.sqlite`; its parent directory is created automatically. The database and SQLite WAL sidecars are gitignored. Startup applies the committed migrations in `drizzle/` before accepting game commands. For schema changes, edit `ts/db/schema.ts`, run `bun run db:generate`, and commit the generated SQL and metadata. Do not edit migrations already deployed.
+
+Game and player records are committed in one transaction. A repeated save of the same game UUID is a no-op. Failed writes retain the result in memory and retry every five seconds before sending queued messages. A restart before a successful write loses that pending result, just as it loses an active game. Completed, committed records survive restarts. Use SQLite's backup API or stop the bot before copying the database; copying only a live `.sqlite` file can miss data in the WAL.
+
+## Railway deployment
+
+1. Deploy this repository with the included `Dockerfile` and `railway.toml`.
+2. **Attach a persistent volume to the bot service with mount path `/data`** in Railway's dashboard (service → Volumes). The TOML file cannot provision the volume. Without it, the container filesystem is ephemeral and stats will be lost on redeploy.
+3. Set `SLACK_BOT_TOKEN`, `SLACK_APP_TOKEN`, and `SLACK_CHANNEL_ID` in Railway variables. The image defaults `DATABASE_PATH` to `/data/wolf.sqlite`; if you set it explicitly, use this absolute path, not the local `.env.example` path.
+4. Keep one replica, with overlapping deployments disabled as configured. The entrypoint gives the `bun` user ownership of the mounted directory and then drops root privileges before starting the bot. Migrations run at startup, after the volume is mounted, not during the image build.
+5. Enable Railway volume backups before accumulating game history. Do not delete the volume when redeploying or replacing the service.
+
+The volume preserves stats only; active games and lobbies still live in memory. Avoid redeploying during a game.
+
 ## Operation and checks
 
 Run one bot process per workspace. Lobby state, game state, event deduplication, and the outgoing message queue live in memory; restarting loses them and players must rejoin. There is no automatic timeout or forced action for absent players, so living players should stay available for voting and night actions. Messages are sent in order; failed deliveries are retained and retried every five seconds. A persistent delivery failure pauses outgoing messages until Slack access is restored. An ambiguous network failure can produce a duplicate message, but retrying delivery does not replay a game command.

@@ -6,6 +6,7 @@ import {
   randomLivingVillager,
   villagerBotVote,
 } from "../bots.js";
+import type { FinishedGame } from "../db/index.js";
 import { GameError, Rng, timeSeed } from "../engine.js";
 import { Lobby, LobbyError } from "../lobby.js";
 
@@ -37,14 +38,27 @@ export class SlackGame {
   private readonly bots = new Set<string>();
   private readonly rng: Rng;
   private readonly dev: boolean;
+  private currentGame: { id: string; startedAt: Date } | null = null;
+  private readonly results: FinishedGame[] = [];
 
   constructor(
     readonly channel: string,
     readonly lobby = new Lobby(),
-    options: { dev?: boolean; seed?: bigint } = {},
+    private readonly options: {
+      dev?: boolean;
+      seed?: bigint;
+      recordResult?: (result: FinishedGame) => void;
+    } = {},
   ) {
     this.dev = options.dev ?? false;
     this.rng = new Rng(options.seed ?? timeSeed());
+  }
+
+  saveResults(): void {
+    while (this.results.length > 0) {
+      this.options.recordResult!(this.results[0]!);
+      this.results.shift();
+    }
   }
 
   handle(input: SlackInput): SlackMessage[] {
@@ -98,6 +112,7 @@ export class SlackGame {
           }
         }
         const { aliveVillagers, aliveWolves } = this.lobby.start(user).state();
+        this.currentGame = { id: crypto.randomUUID(), startedAt: new Date() };
         this.prompt = crypto.randomUUID();
         this.publish(
           `The game has started with ${this.lobby.size} players. Teams: ${aliveWolves} ${aliveWolves === 1 ? "Werewolf" : "Werewolves"} and ${aliveVillagers} Villagers. Roles are in your DMs.`,
@@ -262,6 +277,21 @@ export class SlackGame {
   private announcePhase(): void {
     const state = this.lobby.game!.state();
     if (state.isOver) {
+      if (this.options.recordResult) {
+        this.results.push({
+          ...this.currentGame!,
+          channelId: this.channel,
+          finishedAt: new Date(),
+          winner: state.winner!,
+          dev: this.dev,
+          players: state.players.map((player) => ({
+            seat: player.id,
+            userId: this.user(player.id),
+            role: player.role,
+            isBot: this.isBot(player.id),
+          })),
+        });
+      }
       this.publish(
         `${state.winner} win!\n${state.players.map((p) => `${this.mention(p.id)}: ${p.role}`).join("\n")}\nA new lobby is open! Use \`@werewolf join\` to play again. The first player to join becomes host and can use \`@werewolf start\` once everyone is ready.`,
       );
@@ -282,6 +312,7 @@ export class SlackGame {
   private resetLobby(): void {
     for (const { user } of [...this.lobby.members]) this.lobby.leave(user);
     this.bots.clear();
+    this.currentGame = null;
     this.prompt = "";
   }
 
