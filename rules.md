@@ -8,13 +8,14 @@
 
 ### Role Cards Checklist
 
-| Role | Count (6–8 Players) | Count (9–12 Players) |
-| :--- | :---: | :---: |
-| **Moderator** | 1 (Adult / Host) | 1 (Adult / Host) |
-| **Werewolf** | 2 | 2 or 3 |
-| **Doctor** | 1 | 1 |
-| **Seer** | 1 | 1 |
-| **Villager** | 1–3 | 4–6 |
+| Role | Count in the Chat Game |
+| :--- | :--- |
+| **Moderator** | The bot; does not take a player seat |
+| **Werewolf** | `max(1, floor(player_count / 3))` |
+| **Doctor** | 0 or 1, chosen from the special-role pool |
+| **Seer** | 0 or 1, chosen from the special-role pool |
+| **Hunter** | 0 or 1, chosen from the special-role pool |
+| **Villager** | All remaining seats |
 
 ---
 
@@ -26,6 +27,9 @@ For the chat game, the engine is the moderator and does not take a seat. Games h
 * 🐺 **Werewolves:** The secret villains. They wake up together each night and silently pick one player to eliminate. During the day, they blend in and pretend to be innocent Villagers.
 * 🩺 **Doctor:** The protector. Wakes up each night and chooses one player to save. If the Werewolves target that person, they are saved and stay in the game!
 * 🔮 **Seer:** The detective. Wakes up each night to inspect one player. The Moderator secretly reveals if that person is a Werewolf or innocent.
+* 🏹 **Hunter:** The village's last-shot defender. Has no night action, but when eliminated by a vote or the Werewolves, chooses one living player to eliminate with a final shot.
+
+The Doctor, Seer, and Hunter are all on the village team. Special roles are randomly selected, so not every game includes every role.
 
 ---
 
@@ -75,8 +79,10 @@ After the night actions resolve, check for a winner. If the game continues, begi
 
 ## How to Win
 
-* 🧑‍🌾 **Villagers Win:** When all Werewolves have been successfully eliminated!
-* 🐺 **Werewolves Win:** When the number of Werewolves equals or exceeds the number of remaining Villagers.
+* 🧑‍🌾 **Village Team Wins:** When all Werewolves have been successfully eliminated! Villagers, the Doctor, the Seer, and the Hunter win together.
+* 🐺 **Werewolves Win:** When the number of living Werewolves equals or exceeds the number of all other living players, including special village roles.
+
+If the Hunter has a final shot pending, resolve it before checking either victory condition.
 
 ---
 

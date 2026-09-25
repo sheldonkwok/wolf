@@ -371,7 +371,7 @@ test("day status groups votes into a descending leaderboard with stable ties", (
 });
 
 test("public votes resolve immediately at a strict living majority on every day", () => {
-  for (const count of [5, 6, 8]) {
+  for (const count of [5, 7, 8]) {
     const t = table(count);
     expect(t.command("vote <@U1>")[0]?.text).toContain("not in an active game");
     t.command("start");
@@ -830,7 +830,7 @@ test("doctor saves are public without revealing the doctor and seer results rema
   expect(t.choose(seer, doctor)[0]?.text).toContain("already acted");
   t.choose(doctor, target);
   expect(t.choose(doctor, doctor)[0]?.text).toContain("already acted");
-  const dawn = t.choose(wolf, target);
+  const dawn = players.filter((p) => p.role === "Werewolf").flatMap((p) => t.choose(p.id, target));
   expect(dawn.find((m) => m.text.includes("Doctor saved"))).toEqual({
     destination: "channel",
     text: `The Werewolves attacked <@U${target}>, but the Doctor saved them! No one was eliminated.`,

@@ -35,9 +35,13 @@ test("opening Home publishes instructions only for the configured workspace and 
   expect(JSON.stringify(published[0])).toContain("<#C1>");
   expect(JSON.stringify(published[0])).toContain("<@B1>");
   const page = JSON.stringify(published[0]);
-  for (const role of ["Villager", "Werewolf", "Doctor", "Seer"]) {
+  for (const role of ["Villager", "Werewolf", "Doctor", "Seer", "Hunter"]) {
     expect(page).toContain(`*${role}* —`);
   }
+  expect(page).toContain("*Role selection*");
+  expect(page).toContain("not every game includes every special role");
+  expect(page).toContain("the Doctor cannot protect against the shot");
+  expect(page).toContain("Play and victory checks wait for your shot");
   expect(page).toContain("*Winning*");
   await open("T1", "home");
   expect(published).toHaveLength(2);

@@ -3,6 +3,7 @@
 ## Goal
 We are creating a werewolf game to play with friends on chat apps like Slack or Discord.
 The rules can be found in @rules.md
+Whenever game-rule behavior changes (including adding or changing roles), update `rules.md` and the Slack Home help in `ts/slack/home.ts` together, plus any affected command help or player prompts in `ts/slack/game.ts`. Keep the documentation consistent with the engine and update relevant help tests in `ts/slack-home.test.ts`.
 
 ## Stack
 Rust

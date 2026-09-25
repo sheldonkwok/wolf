@@ -27,14 +27,21 @@ export function registerHome(app: App, team: string, channel: string, bot: strin
             type: "section",
             text: {
               type: "mrkdwn",
-              text: "*During a game*\nDiscuss and vote in the game channel during the day. Your role and night-action buttons arrive privately in the *Messages* tab. DM `status` to recover your role and current prompt.",
+              text: "*During a game*\nDiscuss and vote in the game channel during the day. Your role, night-action buttons, and the Hunter's final-shot buttons arrive privately in the *Messages* tab. DM `status` to recover your role and current prompt.",
             },
           },
           {
             type: "section",
             text: {
               type: "mrkdwn",
-              text: "*Roles*\n• *Villager* — Find the Werewolves through discussion and daytime votes. No night action.\n• *Werewolf* — Know your pack and agree on one player to eliminate each night. Blend in during the day.\n• *Doctor* — Protect one player each night, including yourself. If the pack attacks that player, they survive.\n• *Seer* — Inspect one living player each night to privately learn whether they are a Werewolf, not their exact innocent role.\n• *Hunter* — When eliminated, choose one living player to take down with your final shot using DM buttons. Play and victory checks wait for your shot.",
+              text: "*Roles*\n• *Villager* — Find the Werewolves through discussion and daytime votes. No night action.\n• *Werewolf* — Know your pack and agree on one player to eliminate each night. Blend in during the day.\n• *Doctor* — Protect one player each night, including yourself. If the pack attacks that player, they survive.\n• *Seer* — Inspect one living player each night to privately learn whether they are a Werewolf, not their exact innocent role.\n• *Hunter* — On the village team, with no night action. When eliminated by a vote or the Werewolves, choose one living player to take down using DM buttons. A saved Hunter does not shoot, and the Doctor cannot protect against the shot. Play and victory checks wait for your shot.",
+            },
+          },
+          {
+            type: "section",
+            text: {
+              type: "mrkdwn",
+              text: "*Role selection*\nWerewolves fill one third of the seats, rounded down (at least one). Among the remaining players, up to the greater of two or 33% (rounded down) receive distinct special roles randomly chosen from Doctor, Seer, and Hunter. Remaining seats are ordinary Villagers; not every game includes every special role.",
             },
           },
           {

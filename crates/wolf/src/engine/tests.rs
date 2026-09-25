@@ -118,7 +118,7 @@ fn rejects_fewer_than_five_players() {
 
 #[test]
 fn werewolf_count_scales_with_player_count() {
-    for (players, wolves) in [(5, 1), (7, 1), (8, 2), (11, 2), (12, 3)] {
+    for (players, wolves) in [(5, 1), (6, 2), (7, 2), (8, 2), (9, 3), (11, 3), (12, 4)] {
         let g = Engine::new(players).unwrap();
         let (villagers, actual_wolves) = g.alive_count_by_role();
         assert_eq!(actual_wolves, wolves, "wolves for {players} players");
@@ -138,7 +138,7 @@ fn werewolf_count_scales_with_player_count() {
 
 #[test]
 fn special_village_roles_respect_the_cap_and_are_unique() {
-    for (players, expected) in [(5, 2), (8, 2), (12, 2), (13, 3), (16, 3), (100, 3)] {
+    for (players, expected) in [(5, 2), (8, 2), (12, 2), (13, 2), (14, 3), (16, 3), (100, 3)] {
         for seed in 0..100 {
             let g = Engine::with_seed(players, seed).unwrap();
             let roles: Vec<_> = g.players().iter().map(|p| p.role()).collect();
@@ -153,7 +153,7 @@ fn special_village_roles_respect_the_cap_and_are_unique() {
             assert_eq!(special_count, expected, "players={players}, seed={seed}");
             assert_eq!(
                 roles.iter().filter(|&&r| r == V).count(),
-                players - players / 4 - expected
+                players - players / 3 - expected
             );
             assert!(Engine::with_roles(&roles).is_ok());
         }
@@ -185,7 +185,7 @@ fn random_deals_are_always_valid_and_do_reshuffle() {
     let mut deals = Vec::new();
     for _ in 0..200 {
         let g = Engine::new(10).unwrap();
-        assert_eq!(g.alive_count_by_role(), (8, 2));
+        assert_eq!(g.alive_count_by_role(), (7, 3));
         deals.push(g.players().iter().map(|p| p.role()).collect::<Vec<_>>());
     }
 
@@ -214,7 +214,7 @@ fn with_seed_is_reproducible_and_seed_sensitive() {
     // Every seeded deal is still a legal, correctly-sized roster.
     for seed in 0..50 {
         let g = Engine::with_seed(9, seed).unwrap();
-        assert_eq!(g.alive_count_by_role(), (7, 2));
+        assert_eq!(g.alive_count_by_role(), (6, 3));
         assert_eq!(g.phase(), Phase::Day);
     }
 }
@@ -684,13 +684,13 @@ fn identical_rosters_and_commands_produce_identical_games() {
 
 #[test]
 fn large_deals_include_all_special_roles_on_the_village_team() {
-    for count in 13..=20 {
+    for count in 14..=20 {
         for seed in 0..50 {
             let g = Engine::with_seed(count, seed).unwrap();
             for role in [Role::Doctor, Role::Seer, Role::Hunter] {
                 assert_eq!(g.players().iter().filter(|p| p.role() == role).count(), 1);
             }
-            assert_eq!(g.alive_count_by_role(), (count - count / 4, count / 4));
+            assert_eq!(g.alive_count_by_role(), (count - count / 3, count / 3));
         }
     }
     for role in [Role::Doctor, Role::Seer] {
