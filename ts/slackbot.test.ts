@@ -1,6 +1,7 @@
 import { expect, test } from "bun:test";
 import { type FinishedGame, openStats } from "./db/index.js";
 import { gamePlayers, games } from "./db/schema.js";
+import { Rng } from "./engine.js";
 import { Lobby } from "./lobby.js";
 import { SlackDelivery } from "./slack/delivery.js";
 import { SlackGame, type SlackInput, type SlackMessage } from "./slack/game.js";
@@ -23,7 +24,8 @@ function table(
   autoOpening = true,
 ) {
   const lobby = new SeededLobby(seed);
-  const bot = new SlackGame("CGAME", lobby, { dev, seed, recordResult });
+  let now = 0;
+  const bot = new SlackGame("CGAME", lobby, { dev, seed, recordResult, now: () => now });
   let sequence = 0;
   const messages: SlackMessage[] = [];
   const receive = (input: Omit<SlackInput, "id"> & { text?: string; value?: string }) => {
@@ -35,7 +37,9 @@ function table(
     const output = receive({ kind: "mention", text, user, channel });
     if (autoOpening && text === "start" && lobby.game?.state().phase === "Opening") {
       const state = lobby.game.state();
-      output.push(...choose(state.pendingActors[0]!, state.players.find((p) => p.role === "Werewolf")!.id));
+      if (state.pendingActors.length)
+        output.push(...choose(state.pendingActors[0]!, state.players.find((p) => p.role === "Werewolf")!.id));
+      output.push(...tick(now + 120_000));
     }
     return output;
   };
@@ -53,7 +57,16 @@ function table(
   for (let seat = 0; seat < count; seat++) command("join", `U${seat}`);
   const vote = (seat: number, target: number) =>
     command(dev ? `vote ${target + 1}` : `vote <@U${target}>`, `U${seat}`);
-  return { bot, lobby, messages, receive, command, dm, choose, value, vote };
+  const setNow = (time: number) => {
+    now = time;
+  };
+  const tick = (time: number) => {
+    setNow(time);
+    const output = bot.tick();
+    messages.push(...output);
+    return output;
+  };
+  return { bot, lobby, messages, receive, command, dm, choose, value, vote, tick, setNow };
 }
 
 function reachNight(t: ReturnType<typeof table>) {
@@ -126,7 +139,13 @@ test("opening inspection is private, recoverable, and expires when Day 1 begins"
   expect(result.filter((m) => m.destination === "channel").every((m) => !m.text.includes("inspection"))).toBe(
     true,
   );
-  expect(result.filter((m) => m.text.startsWith("Day 1. Discuss"))).toHaveLength(1);
+  expect(result.filter((m) => m.destination === "channel")).toEqual([]);
+  expect(game.state().phase).toBe("Opening");
+  expect(t.dm(user).some((m) => m.text.includes("opening inspection is recorded"))).toBe(true);
+  expect(t.dm(user).some((m) => m.choices)).toBe(false);
+  expect(t.receive({ kind: "choice", user, channel: "DTEST", value })[0]?.text).toContain("already acted");
+  expect(t.tick(120_000).filter((m) => m.text.startsWith("Day 1. Discuss"))).toHaveLength(1);
+  expect(t.tick(120_001)).toEqual([]);
   expect(game.state().phase).toBe("Day");
   expect(game.state().round).toBe(1);
   expect(game.state().players.every((p) => p.alive)).toBe(true);
@@ -142,7 +161,9 @@ test("opening inspection is private, recoverable, and expires when Day 1 begins"
   );
 });
 
-test("dev openings wait only for human Seers and games without a Seer begin directly", () => {
+test("all dev openings wait for the timer whether Seer is absent, pending, or acted", () => {
+  const publicStarts = new Set<string>();
+  const publicStatuses = new Set<string>();
   const paths = new Set<string>();
   for (let seed = 0n; seed < 40n; seed++) {
     const t = table(1, seed, true, undefined, false);
@@ -151,16 +172,126 @@ test("dev openings wait only for human Seers and games without a Seer begin dire
     const seer = state.players.find((p) => p.role === "Seer");
     const path = !seer ? "no-seer" : seer.id === 0 ? "human" : "bot";
     paths.add(path);
-    expect(state.phase).toBe(path === "human" ? "Opening" : "Day");
-    expect(state.round).toBe(path === "human" ? 0 : 1);
+    expect(state.phase).toBe("Opening");
+    expect(state.round).toBe(0);
     expect(state.inspections).toHaveLength(path === "bot" ? 1 : 0);
     expect(start.filter((m) => m.choices)).toHaveLength(path === "human" ? 1 : 0);
-    expect(start.filter((m) => m.text.startsWith("Day 1. Discuss"))).toHaveLength(path === "human" ? 0 : 1);
-    expect(start.some((m) => m.text.startsWith("Opening"))).toBe(path !== "no-seer");
+    expect(start.filter((m) => m.text.startsWith("Day 1. Discuss"))).toHaveLength(0);
+    publicStarts.add(JSON.stringify(start.filter((m) => m.destination === "channel")));
+    publicStatuses.add(JSON.stringify(t.command("status")));
+    expect(t.tick(59_999)).toEqual([]);
+    expect(t.tick(120_000).filter((m) => m.text.startsWith("Day 1. Discuss"))).toHaveLength(1);
+    expect(t.lobby.game!.state().inspections).toHaveLength(path === "bot" ? 1 : 0);
     expect(start.every((m) => m.destination === "channel" || m.user === "U0")).toBe(true);
     expect(state.players.every((p) => p.alive)).toBe(true);
   }
   expect(paths).toEqual(new Set(["no-seer", "human", "bot"]));
+  expect(publicStarts.size).toBe(1);
+  expect(publicStatuses.size).toBe(1);
+});
+
+test("opening random duration includes both bounds independently of the roster", () => {
+  for (const [seed, deadline] of [
+    [88527n, 60_000],
+    [56411n, 120_000],
+  ] as const) {
+    for (const count of [5, 8]) {
+      const t = table(count, seed, false, undefined, false);
+      t.command("start");
+      expect(t.tick(deadline - 1)).toEqual([]);
+      expect(t.lobby.game!.state().phase).toBe("Opening");
+      expect(t.tick(deadline).filter((m) => m.text.startsWith("Day 1."))).toHaveLength(1);
+      expect(t.lobby.game!.state().phase).toBe("Day");
+    }
+  }
+});
+
+test("opening accepts a choice just before expiry but rejects it at the deadline", () => {
+  for (const offset of [-1, 0]) {
+    const t = table(8, 1n, false, undefined, false);
+    t.command("start");
+    const game = t.lobby.game!;
+    const seer = game.state().pendingActors[0]!;
+    const before = t.command("status");
+    const deadline = 60_000 + new Rng(1n).below(60_001);
+    expect(deadline).toBeGreaterThanOrEqual(60_000);
+    expect(deadline).toBeLessThanOrEqual(120_000);
+    expect(t.tick(deadline - 1)).toEqual([]);
+    t.setNow(deadline + offset);
+    const output = t.choose(seer, seer);
+    if (offset < 0) {
+      expect(output).toHaveLength(1);
+      expect(output[0]?.destination).toBe("dm");
+      expect(t.command("status")).toEqual(before);
+      expect(game.state().inspections).toHaveLength(1);
+      expect(t.tick(deadline).filter((m) => m.text.startsWith("Day 1."))).toHaveLength(1);
+    } else {
+      expect(output.some((m) => m.text.includes("expired"))).toBe(true);
+      expect(output.filter((m) => m.text.startsWith("Day 1."))).toHaveLength(1);
+      expect(game.state().inspections).toEqual([]);
+    }
+    expect(game.state().phase).toBe("Day");
+    expect(t.tick(deadline + 1)).toEqual([]);
+  }
+});
+
+test("invalid channels and duplicate events do not expire an opening", () => {
+  const t = table(8, 1n, false, undefined, false);
+  const input: SlackInput = { id: "start", kind: "mention", channel: "CGAME", user: "U0", text: "start" };
+  t.bot.handle(input);
+  t.setNow(120_000);
+  expect(t.bot.handle(input)).toEqual([]);
+  expect(t.command("status", "U0", "COTHER")).toEqual([]);
+  expect(t.lobby.game!.state().phase).toBe("Opening");
+  expect(t.tick(120_000).filter((m) => m.text.startsWith("Day 1."))).toHaveLength(1);
+});
+
+test("cancelled openings clear their deadline and restarts invalidate old choices", () => {
+  const t = table(8, 1n, false, undefined, false);
+  t.command("start");
+  const seer = t.lobby.game!.state().pendingActors[0]!;
+  const value = t.value(`U${seer}`, seer)!;
+  t.command("end");
+  expect(t.tick(120_000)).toEqual([]);
+  for (let seat = 0; seat < 8; seat++) t.command("join", `U${seat}`);
+  t.command("start");
+  expect(t.receive({ kind: "choice", channel: "DTEST", user: `U${seer}`, value })[0]?.text).toContain(
+    "expired",
+  );
+  expect(t.tick(179_999)).toEqual([]);
+  expect(t.lobby.game!.state().phase).toBe("Opening");
+  expect(t.tick(240_000).filter((m) => m.text.startsWith("Day 1."))).toHaveLength(1);
+});
+
+test("timer delivery failures retry the outbox without replaying the transition", async () => {
+  const t = table(8, 1n, false, undefined, false);
+  const sent: SlackMessage[] = [];
+  let failing = true;
+  let failures = 0;
+  const delivery = new SlackDelivery(
+    t.bot,
+    async (message) => {
+      if (failing) throw new Error("Unavailable");
+      sent.push(message);
+    },
+    () => {
+      failures++;
+    },
+  );
+  await delivery.receive({ id: "start", kind: "mention", channel: "CGAME", user: "U0", text: "start" });
+  t.setNow(120_000);
+  await Promise.all([delivery.retry(), delivery.retry()]);
+  expect(t.lobby.game!.state().phase).toBe("Day");
+  expect(t.lobby.game!.state().inspections).toEqual([]);
+  expect(failures).toBe(3);
+  failing = false;
+  await Promise.all([delivery.retry(), delivery.retry()]);
+  expect(sent.filter((m) => m.destination === "channel" && m.text.startsWith("Opening before"))).toHaveLength(
+    1,
+  );
+  expect(sent.filter((m) => m.text.startsWith("Day 1."))).toHaveLength(1);
+  expect(sent[0]?.text).toContain("game has started");
+  expect(sent.at(-1)?.text).toStartWith("Day 1.");
 });
 
 test("Hunter pauses play, recovers a private prompt, and fires exactly once", () => {

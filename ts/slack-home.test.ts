@@ -44,8 +44,13 @@ test("opening Home publishes instructions only for the configured workspace and 
   expect(page).toContain("Play and victory checks wait for your shot");
   expect(page).toContain("one private inspection before Day 1");
   expect(page).toContain("no attacks, protection, or voting");
-  expect(page).toContain("Without a Seer, Day 1 starts immediately");
-  expect(page).toContain("Inspect one living player before Day 1 and each night");
+  expect(page).toContain("randomly timed 60–120-second opening, with or without a Seer");
+  expect(page).toContain("Day 1 starts at the deadline, even if the Seer has not acted");
+  expect(page).toContain("Acting early does not shorten the opening");
+  expect(page).toContain("public messages do not reveal whether a Seer exists or has acted");
+  expect(page).toContain("Inspect one living player during the timed opening before Day 1 and each night");
+  expect(page).toContain("Missing the opening deadline skips only that inspection");
+  expect(page).not.toContain("Without a Seer, Day 1 starts immediately");
   expect(page).toContain("private inspection history");
   expect(page).toContain("*Winning*");
   await open("T1", "home");

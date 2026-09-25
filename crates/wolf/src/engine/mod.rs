@@ -13,7 +13,7 @@ pub use player::{Player, PlayerId, Role};
 /// The current stage of the game.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Phase {
-    /// Only the seer inspects, before Day 1; their action starts the day.
+    /// Every game waits before Day 1; only the seer may inspect before the adapter ends the opening.
     Opening,
     /// Living night roles act; resolved with [`Engine::resolve_night`].
     Night,
@@ -148,12 +148,8 @@ impl Engine {
             .collect();
         Engine {
             players,
-            phase: if roles.contains(&Role::Seer) {
-                Phase::Opening
-            } else {
-                Phase::Day
-            },
-            round: if roles.contains(&Role::Seer) { 0 } else { 1 },
+            phase: Phase::Opening,
+            round: 0,
             winner: None,
             night_picks: BTreeMap::new(),
             doctor_picks: BTreeMap::new(),
@@ -204,8 +200,7 @@ impl Engine {
         seer: PlayerId,
         target: PlayerId,
     ) -> Result<Inspection, GameError> {
-        let opening = self.phase == Phase::Opening;
-        if !opening {
+        if self.phase != Phase::Opening {
             self.ensure_phase(Phase::Night)?;
         }
         if self.require_alive(seer)?.role() != Role::Seer {
@@ -223,12 +218,16 @@ impl Engine {
         };
         self.seer_picks.insert(seer, target);
         self.inspections.push(inspection);
-        if opening {
-            self.seer_picks.clear();
-            self.phase = Phase::Day;
-            self.round = 1;
-        }
         Ok(inspection)
+    }
+
+    /// End the timed opening, skipping any unsubmitted inspection; the adapter owns the deadline.
+    pub fn resolve_opening(&mut self) -> Result<(), GameError> {
+        self.ensure_phase(Phase::Opening)?;
+        self.seer_picks.clear();
+        self.phase = Phase::Day;
+        self.round = 1;
+        Ok(())
     }
 
     /// Resolve the night: eliminate the wolves' agreed target, check for a win, advance to [`Phase::Day`] or [`Phase::Ended`].
@@ -369,7 +368,9 @@ impl Engine {
     /// Actors still needed in the current phase, or nobody after ending.
     pub fn pending_actors(&self) -> Vec<PlayerId> {
         match self.phase {
-            Phase::Opening => self.living_ids_where(|p| p.role() == Role::Seer),
+            Phase::Opening => self.living_ids_where(|p| {
+                p.role() == Role::Seer && !self.seer_picks.contains_key(&p.id())
+            }),
             Phase::Night => self
                 .living_ids_where(|p| match p.role() {
                     Role::Werewolf => !self.night_picks.contains_key(&p.id()),

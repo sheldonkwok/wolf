@@ -35,7 +35,7 @@ The bot publishes a welcome page when Slack sends `app_home_opened`. For an exis
 
 Starting a game sends private roles and choice prompts. Slack rejects these DMs when the installed app's Messages tab is disabled, even if channel replies work. In [Slack's app dashboard](https://api.slack.com/apps), select the app used by `SLACK_BOT_TOKEN`, open **App Home → Show Tabs**, enable **Messages Tab**, and allow users to send messages from that tab. Save changes. See [Slack's Messages tab setup](https://docs.slack.dev/surfaces/app-home/#enable-messages-tab).
 
-The repository manifest already sets `features.app_home.messages_tab_enabled` to `true` and `messages_tab_read_only_enabled` to `false`; changing the local file does not update an existing Slack app. Keep the bot process running while fixing the app settings: the queue retries every five seconds and resumes delivery once Slack accepts DMs. Restarting loses the current game and queued messages, requiring players to rejoin and start again.
+The repository manifest already sets `features.app_home.messages_tab_enabled` to `true` and `messages_tab_read_only_enabled` to `false`; changing the local file does not update an existing Slack app. Keep the bot process running while fixing the app settings: the queue retries every second and resumes delivery once Slack accepts DMs. Restarting loses the current game and queued messages, requiring players to rejoin and start again.
 
 ## Connected but no response to mentions
 
@@ -61,11 +61,11 @@ For solo testing, run `bun run slackbot -- --dev`, then use `@werewolf join` and
 
 - In your configured `#werewolf` or `#werewolf-test` channel, mention the bot: `@werewolf join`. The first player is host; 5–12 players can join.
 - `@werewolf leave` leaves a waiting lobby; if the host leaves, the next player becomes host.
-- The host uses `@werewolf start`. Everyone receives their role privately. Wolves also learn their pack. Games begin with Day 1 discussion and everyone alive; voting is available immediately. Play proceeds Day 1 → Night 1 → Day 2.
+- The host uses `@werewolf start`. Everyone receives their role privately. Wolves also learn their pack. Every game has a random 60–120-second opening with everyone alive and no voting, attacks, or protection. If present, the Seer can inspect privately before the deadline; a missed inspection is skipped. Day 1 starts at the deadline regardless of whether a Seer exists or has acted, with no public inspection report. Play proceeds Day 1 → Night 1 → Day 2.
 - At night, wolves choose a numbered player in their DM. The prompt maps each number to a Slack mention. Wolves can change a choice until all have chosen. If they disagree, all choose again using new buttons.
 - During the day, any living player votes publicly with `@werewolf vote @player`, mentioning exactly one living player in the game. The bot announces the vote and progress toward a majority. There is no readiness step or DM elimination ballot.
 - Each living player has one vote and can change it by repeating the command with a new target. When more than half of the living players vote for the same target, that player is eliminated immediately and night begins unless a team has won. A split vote keeps the day open, even if everyone has voted. Votes reset each day.
-- When night resolves, the channel receives the outcome and the next day’s voting prompt. The host has no special control over voting, and there is no automatic timer.
+- When night resolves, the channel receives the outcome and the next day’s voting prompt. The host has no special control over voting, and there is no day or night timer.
 - `@werewolf status` displays the public roster, phase, current day votes, and majority required. DM `status` to recover your role and any outstanding choice buttons. `@werewolf help` shows commands privately.
 - The host can use `@werewolf end` in the game channel to cancel an active game at any time, even if eliminated. No winner is declared; the lobby is emptied and old action buttons expire. Players must rejoin to play again.
 - After a win, the channel gets the final roles and a new empty lobby opens. Use `@werewolf join` to play again; the first player to join becomes the new host and can use `@werewolf start` once enough players have joined.
@@ -78,7 +78,7 @@ Completed Slack games are saved to SQLite using Drizzle and Bun's SQLite driver.
 
 Locally, `DATABASE_PATH` defaults to `./data/wolf.sqlite`; its parent directory is created automatically. The database and SQLite WAL sidecars are gitignored. Startup applies the committed migrations in `drizzle/` before accepting game commands. For schema changes, edit `ts/db/schema.ts`, run `bun run db:generate`, and commit the generated SQL and metadata. Do not edit migrations already deployed.
 
-Game and player records are committed in one transaction. A repeated save of the same game UUID is a no-op. Failed writes retain the result in memory and retry every five seconds before sending queued messages. A restart before a successful write loses that pending result, just as it loses an active game. Completed, committed records survive restarts. Use SQLite's backup API or stop the bot before copying the database; copying only a live `.sqlite` file can miss data in the WAL.
+Game and player records are committed in one transaction. A repeated save of the same game UUID is a no-op. Failed writes retain the result in memory and retry every second before sending queued messages. A restart before a successful write loses that pending result, just as it loses an active game. Completed, committed records survive restarts. Use SQLite's backup API or stop the bot before copying the database; copying only a live `.sqlite` file can miss data in the WAL.
 
 ## Railway deployment
 
@@ -92,7 +92,7 @@ The volume preserves stats only; active games and lobbies still live in memory. 
 
 ## Operation and checks
 
-Run one bot process per workspace. Lobby state, game state, event deduplication, and the outgoing message queue live in memory; restarting loses them and players must rejoin. There is no automatic timeout or forced action for absent players, so living players should stay available for voting and night actions. Messages are sent in order; failed deliveries are retained and retried every five seconds. A persistent delivery failure pauses outgoing messages until Slack access is restored. An ambiguous network failure can produce a duplicate message, but retrying delivery does not replay a game command.
+Run one bot process per workspace. Lobby state, game state, event deduplication, and the outgoing message queue live in memory; restarting loses them and players must rejoin. The opening deadline is checked every second and before processing game commands; it skips an unsubmitted Seer inspection. There is no day or night timeout or forced action for absent players, so living players should stay available for voting and night actions. Messages are sent in order; failed deliveries are retained and retried every second. A persistent delivery failure pauses outgoing messages until Slack access is restored. An ambiguous network failure can produce a duplicate message, but retrying delivery does not replay a game command.
 
 Tests use a fake Slack transport and the real addon, without workspace credentials or posting messages:
 

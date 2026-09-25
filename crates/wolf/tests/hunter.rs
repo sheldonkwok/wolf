@@ -2,6 +2,9 @@ use Role::{Doctor, Hunter, Villager, Werewolf};
 use wolf::{Engine, GameError, Phase, PlayerId, Role, Winner};
 
 fn eliminate(g: &mut Engine, target: usize) {
+    if g.phase() == Phase::Opening {
+        g.resolve_opening().unwrap();
+    }
     let voters: Vec<_> = g.alive().map(|p| p.id()).collect();
     for voter in voters {
         g.vote(voter, PlayerId(target)).unwrap();

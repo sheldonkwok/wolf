@@ -21,7 +21,7 @@ export function slackErrorMessage(error: unknown): string {
     if ("data" in current && current.data && typeof current.data === "object") {
       const data = current.data as Record<string, unknown>;
       if (data.error === "messages_tab_disabled") {
-        return "Slack messages_tab_disabled: the app's Messages tab is disabled, blocking private game messages.\nIn the Slack app settings → App Home → Show Tabs, enable Messages Tab and allow users to send messages from that tab. Save changes. The repository manifest already enables these settings; apply them to the app used by SLACK_BOT_TOKEN. Keep this bot process running: queued messages retry every five seconds after the setting is fixed.\nSee slack/README.md.";
+        return "Slack messages_tab_disabled: the app's Messages tab is disabled, blocking private game messages.\nIn the Slack app settings → App Home → Show Tabs, enable Messages Tab and allow users to send messages from that tab. Save changes. The repository manifest already enables these settings; apply them to the app used by SLACK_BOT_TOKEN. Keep this bot process running: queued messages retry every second after the setting is fixed.\nSee slack/README.md.";
       }
       if (data.error === "missing_scope") {
         const scopes = (value: unknown) =>
@@ -216,7 +216,7 @@ async function main(): Promise<void> {
     stats.close();
     throw error;
   }
-  const retry = setInterval(() => void delivery.retry(), 5_000);
+  const retry = setInterval(() => void delivery.retry(), 1_000);
   const stop = async () => {
     clearInterval(retry);
     await app.stop();

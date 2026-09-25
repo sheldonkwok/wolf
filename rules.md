@@ -26,7 +26,7 @@ For the chat game, the engine is the moderator and does not take a seat. Games h
 * 🧑‍🌾 **Villagers:** The innocent townsfolk. They do not have night actions, but during the day they listen to clues, debate, and vote to catch the Werewolves.
 * 🐺 **Werewolves:** The secret villains. They wake up together each night and silently pick one player to eliminate. During the day, they blend in and pretend to be innocent Villagers.
 * 🩺 **Doctor:** The protector. Wakes up each night and chooses one player to save. If the Werewolves target that person, they are saved and stay in the game!
-* 🔮 **Seer:** The detective. Inspects one living player privately before Day 1, then wakes up each night to inspect one player. The Moderator secretly reveals if that person is a Werewolf or innocent.
+* 🔮 **Seer:** The detective. May inspect one living player privately during the timed opening before Day 1, then wakes up each night to inspect one player. The opening inspection is skipped if time runs out. The Moderator secretly reveals if that person is a Werewolf or innocent.
 * 🏹 **Hunter:** The village's last-shot defender. Has no night action, but when eliminated by a vote or the Werewolves, chooses one living player to eliminate with a final shot.
 
 The Doctor, Seer, and Hunter are all on the village team. Special roles are randomly selected, so not every game includes every role.
@@ -41,9 +41,11 @@ Play pauses and victory checks wait until the shot is taken, even if the Hunter'
 
 ## How to Play
 
-After roles are assigned privately, a game with a Seer starts with a **Seer-only opening** before Day 1. The Seer uses DM buttons to inspect one living player (including themselves); only the Seer receives whether that player is a Werewolf or innocent, not the exact innocent role. The choice is final and immediately begins **Day 1**, with everyone alive. There are no Werewolf attacks, Doctor protection, or votes during the opening; everyone else waits. DM `status` recovers the Seer's private inspection history, labeled **Opening**, and any current prompt.
+After roles are assigned privately, **every game has a randomly timed 60–120-second opening** before Day 1, whether or not a Seer is present. The public announcement is simply that the village is settling in; neither timing nor public progress messages reveal whether a Seer exists or has acted. There are no Werewolf attacks, Doctor protection, or votes during the opening, and everyone stays alive.
 
-Without a Seer, the game starts directly with **Day 1**. Players discuss and vote before the first normal night. Play then alternates **Day 1 → Night 1 → Day 2 → Night 2**, until one team wins. The opening inspection does not use up the Seer's Night 1 action.
+If present, the Seer uses DM buttons to inspect one living player (including themselves) before the deadline. Only the Seer receives whether that player is a Werewolf or innocent, not the exact innocent role. The choice is final but does not end the opening early. **Day 1 starts when the timer expires**, even if the Seer has not acted: any unsubmitted opening inspection is skipped, with no public announcement. DM `status` recovers the Seer's private inspection history, labeled **Opening**, and any current prompt.
+
+Players discuss and vote before the first normal night. Play then alternates **Day 1 → Night 1 → Day 2 → Night 2**, until one team wins. Taking or skipping the opening inspection does not use up the Seer's Night 1 action.
 
 ### 1. Day Phase (Eyes Open)
 

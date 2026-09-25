@@ -279,6 +279,12 @@ impl Game {
             .map_err(to_js)
     }
 
+    /// End the timed opening, skipping any unsubmitted inspection.
+    #[napi]
+    pub fn resolve_opening(&mut self) -> napi::Result<()> {
+        self.inner.resolve_opening().map_err(to_js)
+    }
+
     /// Resolve the night and advance the phase.
     #[napi]
     pub fn resolve_night(&mut self) -> napi::Result<NightResult> {

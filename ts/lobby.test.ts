@@ -34,7 +34,8 @@ function playOut(game: Game): void {
     const s = game.state();
     if (s.phase === "Ended") return;
     if (s.phase === "Opening") {
-      game.seerAction(s.pendingActors[0]!, 0);
+      if (s.pendingActors.length > 0) game.seerAction(s.pendingActors[0]!, 0);
+      game.resolveOpening();
     } else if (s.phase === "Hunter") {
       game.hunterAction(s.pendingActors[0]!, s.players.find((p) => p.alive)!.id);
     } else if (s.phase === "Night") {

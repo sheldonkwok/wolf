@@ -77,9 +77,11 @@ fn play_out(g: &mut Engine, rng: &mut Rng, unanimous_town: bool) {
     for _ in 0..(g.players().len() * 2 + 4) {
         match g.phase() {
             Phase::Opening => {
-                let seer = g.pending_actors()[0];
-                let target = rng.pick(&living_ids(g));
-                g.seer_action(seer, target).unwrap();
+                if let Some(&seer) = g.pending_actors().first() {
+                    let target = rng.pick(&living_ids(g));
+                    g.seer_action(seer, target).unwrap();
+                }
+                g.resolve_opening().unwrap();
             }
             Phase::Night => {
                 let wolves = living_wolf_ids(g);

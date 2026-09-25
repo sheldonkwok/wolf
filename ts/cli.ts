@@ -98,16 +98,19 @@ function parseArgs(argv: string[]): Args {
 
 // ----- stdin, one trimmed line at a time --------------------------------------
 
-class LineReader {
-  private it = Bun.stdin.stream()[Symbol.asyncIterator]();
+export class LineReader {
+  private pending: Promise<IteratorResult<Uint8Array>> | undefined;
+
+  constructor(private it: AsyncIterator<Uint8Array> = Bun.stdin.stream()[Symbol.asyncIterator]()) {}
   private decoder = new TextDecoder();
   private buf = "";
   private queue: string[] = [];
   private closed = false;
 
-  // The next line trimmed, or null at end of input.
-  async next(): Promise<string | null> {
+  // A trimmed line, null at EOF, or undefined at the deadline; chunk reads survive timeouts.
+  async next(deadline?: number): Promise<string | null | undefined> {
     for (;;) {
+      if (deadline !== undefined && performance.now() >= deadline) return undefined;
       const ready = this.queue.shift();
       if (ready !== undefined) return ready.trim();
       if (this.closed) {
@@ -116,7 +119,24 @@ class LineReader {
         this.buf = "";
         return rest.trim();
       }
-      const chunk = await this.it.next();
+      this.pending ??= this.it.next();
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      let chunk: IteratorResult<Uint8Array> | undefined;
+      try {
+        chunk = await (deadline === undefined
+          ? this.pending
+          : Promise.race([
+              this.pending,
+              new Promise<undefined>((resolve) => {
+                timer = setTimeout(() => resolve(undefined), Math.max(0, deadline - performance.now()));
+              }),
+            ]));
+      } finally {
+        clearTimeout(timer);
+      }
+      if (deadline !== undefined && performance.now() >= deadline) return undefined;
+      if (chunk === undefined) continue;
+      this.pending = undefined;
       if (chunk.done) {
         this.closed = true;
         continue;
@@ -134,7 +154,7 @@ class LineReader {
 
 // ----- the run ------------------------------------------------------------
 
-class Table {
+export class Table {
   private nightVictim: number | null = null;
   private nightSaved: number | null = null;
 
@@ -144,6 +164,7 @@ class Table {
     private me: number,
     private reveal: boolean,
     private reader: LineReader,
+    private openingDurationMs = () => (60 + rng.below(61)) * 1_000,
   ) {}
 
   private state(): GameState {
@@ -159,7 +180,17 @@ class Table {
   }
 
   // Ask the human to pick one of `choices`, accepting a seat number or a name prefix.
-  private async promptPlayer(question: string, choices: number[]): Promise<number | null> {
+  private promptPlayer(question: string, choices: number[]): Promise<number | null>;
+  private promptPlayer(
+    question: string,
+    choices: number[],
+    deadline: number,
+  ): Promise<number | null | undefined>;
+  private async promptPlayer(
+    question: string,
+    choices: number[],
+    deadline?: number,
+  ): Promise<number | null | undefined> {
     console.log(question);
     let menu = "  ";
     for (const id of choices) {
@@ -171,9 +202,11 @@ class Table {
     console.log(menu.trimEnd());
 
     for (;;) {
+      if (deadline !== undefined && performance.now() >= deadline) return undefined;
       process.stdout.write("> ");
-      const input = await this.reader.next();
-      if (input === null) return null;
+      const input = await this.reader.next(deadline);
+      if (deadline !== undefined && performance.now() >= deadline) return undefined;
+      if (input === null || input === undefined) return input;
       if (input === "") continue;
 
       if (/^\d+$/.test(input)) {
@@ -198,17 +231,32 @@ class Table {
   }
 
   private async runOpening(): Promise<boolean> {
-    this.drawBanner("Opening inspection — before Day 1");
-    const seer = this.state().pendingActors[0]!;
-    const target =
-      seer === this.me
-        ? await this.promptPlayer("Seer, inspect one player before Day 1 begins.", livingIds(this.state()))
-        : randomLivingOther(this.state(), this.rng, seer);
-    if (target === null) return false;
-    const result = this.game.seerAction(seer, target);
-    if (seer === this.me)
-      console.log(`${nameOf(target)} is ${result.isWerewolf ? "a Werewolf" : "innocent"}.`);
-    else console.log("The Seer has completed their opening inspection.");
+    const duration = this.openingDurationMs();
+    const deadline = performance.now() + duration;
+    this.drawBanner("Opening — before Day 1");
+    console.log(`The village settles in. Day 1 begins in ${Math.ceil(duration / 1_000)} seconds.`);
+    const seer = this.state().pendingActors[0];
+    if (seer !== undefined) {
+      const target =
+        seer === this.me
+          ? await this.promptPlayer(
+              "Seer, inspect one player before Day 1 begins (optional; choose before the timer ends).",
+              livingIds(this.state()),
+              deadline,
+            )
+          : randomLivingOther(this.state(), this.rng, seer);
+      if (target === null) return false;
+      if (target !== undefined && performance.now() < deadline) {
+        const result = this.game.seerAction(seer, target);
+        if (seer === this.me)
+          console.log(`${nameOf(target)} is ${result.isWerewolf ? "a Werewolf" : "innocent"}.`);
+      }
+    }
+    while (performance.now() < deadline) {
+      const input = await this.reader.next(deadline);
+      if (input === null) return false;
+    }
+    this.game.resolveOpening();
     return true;
   }
 
@@ -438,4 +486,4 @@ async function main(): Promise<void> {
   await table.run(seed, players);
 }
 
-await main();
+if (import.meta.main) await main();
