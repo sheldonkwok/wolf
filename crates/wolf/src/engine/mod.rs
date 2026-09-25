@@ -78,7 +78,7 @@ impl Engine {
     /// The fewest players a game can be built with.
     pub const MIN_PLAYERS: usize = 5;
 
-    /// Deal `max(1, player_count / 4)` wolves and up to `max(2, floor(village_count * 33%))` distinct special village roles.
+    /// Deal `max(1, player_count / 3)` wolves and up to `max(2, floor(village_count * 33%))` distinct special village roles.
     pub fn new(player_count: usize) -> Result<Self, GameError> {
         Self::with_seed(player_count, time_seed())
     }
@@ -92,7 +92,7 @@ impl Engine {
             });
         }
 
-        let wolves = (player_count / 4).max(1);
+        let wolves = (player_count / 3).max(1);
         let villagers = player_count - wolves;
         let mut rng = SplitMix64::new(seed);
         let mut special_roles = [Role::Doctor, Role::Seer, Role::Hunter];

@@ -18,7 +18,7 @@
 
 ---
 
-For the chat game, the engine is the moderator and does not take a seat. Games have at least 5 players and `max(1, player_count / 4)` Werewolves (rounded down). Among the non-Werewolf players, up to `max(2, floor(village_count × 33%))` receive special roles, chosen randomly without replacement from Doctor, Seer, and Hunter. If all three fit, all are included; remaining seats are ordinary Villagers.
+For the chat game, the engine is the moderator and does not take a seat. Games have at least 5 players and `max(1, player_count / 3)` Werewolves (rounded down). Among the non-Werewolf players, up to `max(2, floor(village_count × 33%))` receive special roles, chosen randomly without replacement from Doctor, Seer, and Hunter. If all three fit, all are included; remaining seats are ordinary Villagers.
 
 ## The Roles Explained
 
