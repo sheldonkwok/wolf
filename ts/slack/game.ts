@@ -476,8 +476,10 @@ export class SlackGame {
   private status(): string {
     const state = this.lobby.game?.state();
     if (!state) return this.roster();
-    const votes =
-      state.phase === "Day" ? `\n${this.voteLeaderboard()}\nVote with \`@werewolf vote @player\`.` : "";
+    if (state.phase === "Day") {
+      const livingCount = state.players.filter((player) => player.alive).length;
+      return `Day ${state.round}.\n${this.voteLeaderboard()}\nVote with \`@werewolf vote @player\`.\nLiving players: ${livingCount}.`;
+    }
     const night =
       state.phase === "Night"
         ? "\nNight ends automatically once all living players with night actions have submitted their choices. DM `status` to check your own action or get your buttons again."
@@ -487,7 +489,7 @@ export class SlackGame {
       state.phase === "Opening"
         ? "\nWaiting for the random 60–120 second opening timer. No attacks, protection, or voting. Day 1 starts automatically."
         : "";
-    return `${phase}.\n${this.livingRoster()}${votes}${night}${opening}`;
+    return `${phase}.\n${this.livingRoster()}${night}${opening}`;
   }
 
   private voteLeaderboard(): string {
@@ -507,7 +509,11 @@ export class SlackGame {
             .map((voter) => this.mention(voter))
             .join(", ")}`,
       );
-    return `Vote leaderboard (${state.majorityRequired} needed):\n${rows.length ? rows.join("\n") : "No votes yet."}`;
+    const voted = new Set(state.votes.map(({ voter }) => voter));
+    const notVoted = state.players
+      .filter((player) => player.alive && !voted.has(player.id))
+      .map((player) => this.mention(player.id));
+    return `Vote leaderboard (${state.majorityRequired} needed):\n${rows.length ? rows.join("\n") : "No votes yet."}\nNot voted: ${notVoted.length ? notVoted.join(", ") : "Nobody"}.`;
   }
 
   private roster(): string {

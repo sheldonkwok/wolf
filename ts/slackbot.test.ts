@@ -574,13 +574,17 @@ test("event retries cannot replay a command or cross into another game", () => {
 test("day status groups votes into a descending leaderboard with stable ties", () => {
   const t = table();
   t.command("start");
-  expect(t.command("status")[0]?.text).toContain("Vote leaderboard (5 needed):\nNo votes yet.");
+  const initial = t.command("status")[0]!.text;
+  expect(initial).toContain("Vote leaderboard (5 needed):\nNo votes yet.");
+  expect(initial).toContain("Not voted: <@U0>, <@U1>, <@U2>, <@U3>, <@U4>, <@U5>, <@U6>, <@U7>.");
+  expect(initial).not.toContain("Living players:\n");
+  expect(initial.endsWith("Living players: 8.")).toBe(true);
   t.vote(0, 4);
   t.vote(3, 6);
   t.vote(1, 6);
   t.vote(2, 5);
   const leaderboard =
-    "Vote leaderboard (5 needed):\n• <@U6> — 2 votes\n  Voters: <@U1>, <@U3>\n• <@U4> — 1 vote\n  Voters: <@U0>\n• <@U5> — 1 vote\n  Voters: <@U2>";
+    "Vote leaderboard (5 needed):\n• <@U6> — 2 votes\n  Voters: <@U1>, <@U3>\n• <@U4> — 1 vote\n  Voters: <@U0>\n• <@U5> — 1 vote\n  Voters: <@U2>\nNot voted: <@U4>, <@U5>, <@U6>, <@U7>.";
   expect(t.command("status")[0]?.text).toContain(leaderboard);
   expect(t.dm("U0").some((m) => m.text.includes(leaderboard))).toBe(true);
   t.vote(0, 6);
@@ -589,10 +593,23 @@ test("day status groups votes into a descending leaderboard with stable ties", (
   expect(status).toContain("• <@U6> — 3 votes\n  Voters: <@U0>, <@U1>, <@U3>");
   expect(status).not.toContain("• <@U4>");
   expect(status).not.toContain("→");
+  expect(status).toContain("Not voted: <@U4>, <@U5>, <@U6>, <@U7>.");
+  expect(status).not.toContain("Living players:\n");
+  expect(status.endsWith("Living players: 8.")).toBe(true);
   reachNight(t);
-  expect(t.command("status")[0]?.text).not.toContain("Vote leaderboard");
+  const nightStatus = t.command("status")[0]!.text;
+  expect(nightStatus).not.toContain("Vote leaderboard");
+  expect(nightStatus).toContain("Living players:\n");
   morning(t);
-  expect(t.command("status")[0]?.text).toContain("No votes yet.");
+  const nextDay = t.command("status")[0]!.text;
+  const players = t.lobby.game!.state().players;
+  const living = players.filter((player) => player.alive);
+  expect(nextDay).toContain("No votes yet.");
+  expect(nextDay).toContain(`Not voted: ${living.map((player) => `<@U${player.id}>`).join(", ")}.`);
+  expect(nextDay.endsWith(`Living players: ${living.length}.`)).toBe(true);
+  for (const player of players.filter((player) => !player.alive)) {
+    expect(nextDay).not.toContain(`<@U${player.id}>`);
+  }
 });
 
 test("public votes resolve immediately at a strict living majority on every day", () => {
