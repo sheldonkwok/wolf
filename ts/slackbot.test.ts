@@ -52,7 +52,7 @@ function reachNight(t: ReturnType<typeof table>) {
 
 function morning(t: ReturnType<typeof table>) {
   const state = t.lobby.game!.state();
-  const target = state.players.find((p) => p.alive && p.role !== "Werewolf")!.id;
+  const target = state.players.find((p) => p.alive && p.role !== "Werewolf" && p.role !== "Hunter")!.id;
   for (const actor of state.pendingActors) {
     const choice =
       state.players[actor]!.role === "Doctor"
@@ -71,6 +71,35 @@ function eliminate(t: ReturnType<typeof table>, target: number): SlackMessage[] 
   }
   return output;
 }
+
+test("Hunter pauses play, recovers a private prompt, and fires exactly once", () => {
+  const t = table(5);
+  t.command("start");
+  const game = t.lobby.game!;
+  const hunter = game.state().players.find((p) => p.role === "Hunter")!.id;
+  const wolf = game.state().players.find((p) => p.role === "Werewolf")!.id;
+  const output = eliminate(t, hunter);
+  expect(game.state().phase).toBe("Hunter");
+  expect(game.state().winner).toBeUndefined();
+  expect(output.some((m) => m.destination === "channel" && m.text.includes("final shot"))).toBe(true);
+  const prompt = t.dm(`U${hunter}`).find((m) => m.choices)!;
+  expect(prompt.destination).toBe("dm");
+  expect(prompt.choices).toHaveLength(4);
+  const value = t.value(`U${hunter}`, wolf)!;
+  const before = game.state();
+  expect(t.vote(wolf, wolf)[0]?.text).toContain("requires Day");
+  expect(t.receive({ kind: "choice", user: `U${wolf}`, channel: "DTEST", value })[0]?.text).toContain(
+    "belongs",
+  );
+  expect(game.state()).toEqual(before);
+  const shot = t.choose(hunter, wolf);
+  expect(shot.some((m) => m.destination === "channel" && m.text.includes("Hunter's final shot"))).toBe(true);
+  expect(game.state().winner).toBe("Villagers");
+  expect(t.lobby.game).toBeNull();
+  expect(t.receive({ kind: "choice", user: `U${hunter}`, channel: "DTEST", value })[0]?.text).toContain(
+    "not in an active game",
+  );
+});
 
 test("channel boundary, host transfer, lobby minimum, and host-only start", () => {
   const t = table(4);
@@ -465,7 +494,9 @@ test("real engine games finish for every lobby size and can restart", () => {
         if (++turns > 24) throw new Error("Game did not finish");
         const state = t.lobby.game.state();
         if (state.phase === "Night") morning(t);
-        else {
+        else if (state.phase === "Hunter") {
+          t.choose(state.pendingActors[0]!, state.players.find((p) => p.alive)!.id);
+        } else {
           expect(state.votes).toEqual([]);
           old ??= `${crypto.randomUUID()}:U${wolf}:0`;
           const target = state.players.find((p) => p.alive && p.role === "Werewolf")!.id;
@@ -703,7 +734,9 @@ test("dev games fill with bots, wait for humans, finish after elimination, and c
           state.phase === "Day" ? state.players.filter((p) => p.alive).map((p) => p.id) : state.pendingActors
         ).filter((seat) => seat < humans);
         expect(humanActors.length).toBeGreaterThan(0);
-        if (state.phase === "Night") {
+        if (state.phase === "Hunter") {
+          t.choose(state.pendingActors[0]!, state.players.find((p) => p.alive)!.id);
+        } else if (state.phase === "Night") {
           const target = state.players.find((p) => p.alive && p.role !== "Werewolf")!.id;
           for (const seat of humanActors) t.choose(seat, target);
         } else {
@@ -741,7 +774,7 @@ test("dev games fill with bots, wait for humans, finish after elimination, and c
       expect(t.command("start")[0]?.text).toContain("started with 5 players");
     }
   }
-  expect(roles).toEqual(new Set(["Werewolf", "Villager", "Doctor", "Seer"]));
+  expect(roles).toEqual(new Set(["Werewolf", "Villager", "Doctor", "Seer", "Hunter"]));
   expect(soloVotes).toBeGreaterThan(0);
   expect(eliminatedHumans).toBeGreaterThan(0);
 });

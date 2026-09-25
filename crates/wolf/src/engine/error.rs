@@ -19,6 +19,8 @@ pub enum GameError {
     NotADoctor(PlayerId),
     /// A non-seer tried to inspect a player.
     NotASeer(PlayerId),
+    /// Only the eliminated hunter awaiting their shot may act.
+    NotPendingHunter(PlayerId),
     /// The last living werewolf cannot choose themselves as the night target.
     LastWolfCannotTargetSelf,
     /// The command is not legal in the current phase.
@@ -44,6 +46,7 @@ impl GameError {
             GameError::NotAWerewolf(_) => "NotAWerewolf",
             GameError::NotADoctor(_) => "NotADoctor",
             GameError::NotASeer(_) => "NotASeer",
+            GameError::NotPendingHunter(_) => "NotPendingHunter",
             GameError::LastWolfCannotTargetSelf => "LastWolfCannotTargetSelf",
             GameError::WrongPhase { .. } => "WrongPhase",
             GameError::AlreadyActed(_) => "AlreadyActed",
@@ -66,6 +69,7 @@ impl fmt::Display for GameError {
             GameError::NotAWerewolf(id) => write!(f, "player {id} is not a werewolf"),
             GameError::NotADoctor(id) => write!(f, "player {id} is not a doctor"),
             GameError::NotASeer(id) => write!(f, "player {id} is not a seer"),
+            GameError::NotPendingHunter(id) => write!(f, "player {id} is not the pending hunter"),
             GameError::LastWolfCannotTargetSelf => {
                 write!(
                     f,

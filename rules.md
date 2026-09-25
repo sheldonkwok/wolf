@@ -18,7 +18,7 @@
 
 ---
 
-For the chat game, the engine is the moderator and does not take a seat. Games have at least 5 players, one Doctor, one Seer, `max(1, player_count / 4)` Werewolves (rounded down), and Villagers in the remaining seats.
+For the chat game, the engine is the moderator and does not take a seat. Games have at least 5 players, one Doctor, one Seer, one Hunter, `max(1, player_count / 4)` Werewolves (rounded down), and Villagers in the remaining seats.
 
 ## The Roles Explained
 
@@ -28,6 +28,12 @@ For the chat game, the engine is the moderator and does not take a seat. Games h
 * 🔮 **Seer:** The detective. Wakes up each night to inspect one player. The Moderator secretly reveals if that person is a Werewolf or innocent.
 
 ---
+
+### Hunter (Chat Game)
+
+The **Hunter** is on the village team and replaces one Villager in the chat roster. They have no night action. When eliminated by a vote or the Werewolves, they must choose one living player to eliminate with a final shot using their DM buttons. A saved Hunter does not shoot. The shot cannot be protected by the Doctor.
+
+Play pauses and victory checks wait until the shot is taken, even if the Hunter's death would give the wolves parity. After the shot, check for a winner; otherwise continue to night after a daytime elimination, or the next numbered day after a nighttime elimination. The Hunter then becomes a spectator.
 
 ## How to Play
 

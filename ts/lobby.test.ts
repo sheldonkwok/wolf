@@ -33,7 +33,9 @@ function playOut(game: Game): void {
   for (let i = 0; i < cap; i++) {
     const s = game.state();
     if (s.phase === "Ended") return;
-    if (s.phase === "Night") {
+    if (s.phase === "Hunter") {
+      game.hunterAction(s.pendingActors[0]!, s.players.find((p) => p.alive)!.id);
+    } else if (s.phase === "Night") {
       const victim = s.players.find((p) => p.alive && p.role !== "Werewolf")!.id;
       const wolves = s.players.filter((p) => p.alive && p.role === "Werewolf").map((p) => p.id);
       for (const wolf of wolves) game.nightAction(wolf, victim);

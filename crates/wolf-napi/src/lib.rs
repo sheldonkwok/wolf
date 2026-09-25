@@ -17,6 +17,7 @@ pub enum Role {
     Werewolf,
     Doctor,
     Seer,
+    Hunter,
 }
 
 #[napi(string_enum)]
@@ -24,6 +25,7 @@ pub enum Phase {
     Night,
     Day,
     Ended,
+    Hunter,
 }
 
 #[napi(string_enum)]
@@ -51,6 +53,7 @@ impl From<EngineRole> for Role {
             EngineRole::Werewolf => Role::Werewolf,
             EngineRole::Doctor => Role::Doctor,
             EngineRole::Seer => Role::Seer,
+            EngineRole::Hunter => Role::Hunter,
         }
     }
 }
@@ -62,6 +65,7 @@ impl From<Role> for EngineRole {
             Role::Werewolf => EngineRole::Werewolf,
             Role::Doctor => EngineRole::Doctor,
             Role::Seer => EngineRole::Seer,
+            Role::Hunter => EngineRole::Hunter,
         }
     }
 }
@@ -72,6 +76,7 @@ impl From<EnginePhase> for Phase {
             EnginePhase::Night => Phase::Night,
             EnginePhase::Day => Phase::Day,
             EnginePhase::Ended => Phase::Ended,
+            EnginePhase::Hunter => Phase::Hunter,
         }
     }
 }
@@ -261,6 +266,14 @@ impl Game {
         self.inner
             .seer_action(PlayerId(seer as usize), PlayerId(target as usize))
             .map(Into::into)
+            .map_err(to_js)
+    }
+
+    /// Take the eliminated hunter's final shot.
+    #[napi]
+    pub fn hunter_action(&mut self, hunter: u32, target: u32) -> napi::Result<()> {
+        self.inner
+            .hunter_action(PlayerId(hunter as usize), PlayerId(target as usize))
             .map_err(to_js)
     }
 

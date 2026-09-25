@@ -26,6 +26,7 @@ const GAME_ERROR_CODES = [
   "NotAWerewolf",
   "NotADoctor",
   "NotASeer",
+  "NotPendingHunter",
   "LastWolfCannotTargetSelf",
   "WrongPhase",
   "AlreadyActed",
@@ -131,6 +132,10 @@ export class Game {
 
   seerAction(seer: number, target: number): InspectionView {
     return attempt(() => this.inner.seerAction(seer, target));
+  }
+
+  hunterAction(hunter: number, target: number): void {
+    attempt(() => this.inner.hunterAction(hunter, target));
   }
 
   resolveNight(): NightResolution {

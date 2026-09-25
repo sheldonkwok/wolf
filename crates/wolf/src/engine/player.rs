@@ -24,6 +24,7 @@ pub enum Role {
     Werewolf,
     Doctor,
     Seer,
+    Hunter,
 }
 
 /// A player and everything the engine tracks about them.

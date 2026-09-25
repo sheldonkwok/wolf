@@ -19,6 +19,8 @@ pub enum Phase {
     Day,
     /// A team has won. No further commands are accepted.
     Ended,
+    /// An eliminated hunter takes their final shot before play resumes.
+    Hunter,
 }
 
 /// The winning team once the game is over.
@@ -69,13 +71,14 @@ pub struct Engine {
     inspections: Vec<Inspection>,
     /// Living voter -> the player they voted for this day.
     day_votes: BTreeMap<PlayerId, PlayerId>,
+    pending_hunter: Option<(PlayerId, Phase)>,
 }
 
 impl Engine {
     /// The fewest players a game can be built with.
     pub const MIN_PLAYERS: usize = 5;
 
-    /// Build a game for `player_count` players with random roles: one doctor, one seer, `max(1, player_count / 4)` wolves, and villagers.
+    /// Build a game for `player_count` players with random roles: one doctor, one seer, one hunter, `max(1, player_count / 4)` wolves, and villagers.
     pub fn new(player_count: usize) -> Result<Self, GameError> {
         Self::with_seed(player_count, time_seed())
     }
@@ -92,10 +95,10 @@ impl Engine {
         let wolves = (player_count / 4).max(1);
         let mut roles = Vec::with_capacity(player_count);
         roles.extend(std::iter::repeat_n(Role::Werewolf, wolves));
-        roles.extend([Role::Doctor, Role::Seer]);
+        roles.extend([Role::Doctor, Role::Seer, Role::Hunter]);
         roles.extend(std::iter::repeat_n(
             Role::Villager,
-            player_count - wolves - 2,
+            player_count - wolves - 3,
         ));
         SplitMix64::new(seed).shuffle(&mut roles);
 
@@ -120,10 +123,10 @@ impl Engine {
                 "werewolves start at or above parity with villagers",
             ));
         }
-        for role in [Role::Doctor, Role::Seer] {
+        for role in [Role::Doctor, Role::Seer, Role::Hunter] {
             if roles.iter().filter(|r| **r == role).count() > 1 {
                 return Err(GameError::InvalidRoster(
-                    "at most one doctor and one seer are allowed",
+                    "at most one doctor, one seer, and one hunter are allowed",
                 ));
             }
         }
@@ -146,6 +149,7 @@ impl Engine {
             seer_picks: BTreeMap::new(),
             inspections: Vec::new(),
             day_votes: BTreeMap::new(),
+            pending_hunter: None,
         }
     }
 
@@ -235,13 +239,10 @@ impl Engine {
         self.night_picks.clear();
         self.doctor_picks.clear();
         self.seer_picks.clear();
-        if !saved {
-            self.players[target.index()].kill();
-        }
-        self.settle();
-        if self.phase != Phase::Ended {
-            self.phase = Phase::Day;
-            self.round += 1;
+        if saved {
+            self.resume(Phase::Day);
+        } else {
+            self.eliminate(target, Phase::Day);
         }
         Ok(if saved {
             NightOutcome::Saved(target)
@@ -264,12 +265,23 @@ impl Engine {
         self.ensure_phase(Phase::Day)?;
         let target = self.majority_target().ok_or(GameError::NoMajority)?;
         self.day_votes.clear();
-        self.players[target.index()].kill();
-        self.settle();
-        if self.phase != Phase::Ended {
-            self.phase = Phase::Night;
-        }
+        self.eliminate(target, Phase::Night);
         Ok(DayOutcome::Eliminated(target))
+    }
+
+    /// The eliminated hunter must shoot one living player before victory is checked.
+    pub fn hunter_action(&mut self, hunter: PlayerId, target: PlayerId) -> Result<(), GameError> {
+        self.ensure_phase(Phase::Hunter)?;
+        self.role_of(hunter)?;
+        let (pending, next) = self.pending_hunter.expect("hunter phase has an actor");
+        if hunter != pending {
+            return Err(GameError::NotPendingHunter(hunter));
+        }
+        self.require_alive(target)?;
+        self.players[target.index()].kill();
+        self.pending_hunter = None;
+        self.resume(next);
+        Ok(())
     }
 
     // ----- inspection ---------------------------------------------------------
@@ -328,7 +340,7 @@ impl Engine {
         let mut wolves = 0;
         for p in self.alive() {
             match p.role() {
-                Role::Villager | Role::Doctor | Role::Seer => villagers += 1,
+                Role::Villager | Role::Doctor | Role::Seer | Role::Hunter => villagers += 1,
                 Role::Werewolf => wolves += 1,
             }
         }
@@ -343,7 +355,7 @@ impl Engine {
                     Role::Werewolf => !self.night_picks.contains_key(&p.id()),
                     Role::Doctor => !self.doctor_picks.contains_key(&p.id()),
                     Role::Seer => !self.seer_picks.contains_key(&p.id()),
-                    Role::Villager => false,
+                    Role::Villager | Role::Hunter => false,
                 })
                 .into_iter()
                 .collect(),
@@ -352,6 +364,7 @@ impl Engine {
                 .into_iter()
                 .filter(|id| !self.day_votes.contains_key(id))
                 .collect(),
+            Phase::Hunter => vec![self.pending_hunter.expect("hunter phase has an actor").0],
             Phase::Ended => Vec::new(),
         }
     }
@@ -403,6 +416,26 @@ impl Engine {
     }
 
     // ----- internals --------------------------------------------------------
+
+    fn eliminate(&mut self, target: PlayerId, next: Phase) {
+        self.players[target.index()].kill();
+        if self.players[target.index()].role() == Role::Hunter {
+            self.pending_hunter = Some((target, next));
+            self.phase = Phase::Hunter;
+        } else {
+            self.resume(next);
+        }
+    }
+
+    fn resume(&mut self, next: Phase) {
+        self.settle();
+        if self.phase != Phase::Ended {
+            self.phase = next;
+            if next == Phase::Day {
+                self.round += 1;
+            }
+        }
+    }
 
     fn ensure_phase(&self, expected: Phase) -> Result<(), GameError> {
         if self.phase == Phase::Ended {

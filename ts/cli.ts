@@ -322,6 +322,19 @@ class Table {
     return true;
   }
 
+  private async runHunter(): Promise<boolean> {
+    const hunter = this.state().pendingActors[0]!;
+    console.log(`${nameOf(hunter)} is the Hunter and has a final shot.`);
+    const target =
+      hunter === this.me
+        ? await this.promptPlayer("Choose one player to take down with you.", livingIds(this.state()))
+        : pick(this.rng, livingIds(this.state()));
+    if (target === null) return false;
+    this.game.hunterAction(hunter, target);
+    console.log(`${nameOf(target)} was shot by the Hunter. (${roleTag(this.game.roleOf(target))})`);
+    return true;
+  }
+
   async run(seed: bigint, players: number): Promise<void> {
     const myRole = this.game.roleOf(this.me);
     console.log(`Seed ${seed} · ${players} players · you are ${nameOf(this.me)} (${roleTag(myRole)})`);
@@ -338,6 +351,7 @@ class Table {
       let step: boolean;
       if (phase === "Night") step = await this.runNight();
       else if (phase === "Day") step = await this.runDay();
+      else if (phase === "Hunter") step = await this.runHunter();
       else break;
 
       if (!step) {
@@ -345,7 +359,11 @@ class Table {
         return;
       }
       if (aliveLast && !this.iAmAlive()) {
-        console.log("\nYou are out of the game — sit back and watch it play out.");
+        console.log(
+          this.state().phase === "Hunter" && this.game.roleOf(this.me) === "Hunter"
+            ? "\nYou were eliminated, but still have your final shot."
+            : "\nYou are out of the game — sit back and watch it play out.",
+        );
         aliveLast = false;
       }
     }

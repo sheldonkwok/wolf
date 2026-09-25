@@ -29,7 +29,7 @@ export type SlackInput = {
 } & ({ kind: "mention" | "dm"; text: string } | { kind: "choice"; value: string });
 
 const HELP =
-  "In the game channel: `@werewolf join`, `leave`, `start`, `end`, `status`, `vote @player`, or `help`. The first player is host; only the host starts or ends games. Use `@werewolf end` to cancel the game and open a fresh lobby. During the day, vote publicly with `@werewolf vote @player`. More than half of the living players must vote for the same player to eliminate them and begin night. Repeat the command to change your vote before a majority is reached. Use DM buttons for night actions. DM `status` to get your role and current night prompt again.";
+  "In the game channel: `@werewolf join`, `leave`, `start`, `end`, `status`, `vote @player`, or `help`. The first player is host; only the host starts or ends games. Use `@werewolf end` to cancel the game and open a fresh lobby. During the day, vote publicly with `@werewolf vote @player`. More than half of the living players must vote for the same player to eliminate them and begin night. Repeat the command to change your vote before a majority is reached. Use DM buttons for night actions and the Hunter's final shot. DM `status` to get your role and current night prompt again.";
 
 export class SlackGame {
   private readonly seen = new Set<string>();
@@ -178,6 +178,11 @@ export class SlackGame {
     if (!Number.isSafeInteger(target) || !this.lobby.memberAt(target))
       throw new CommandError("Unknown target.");
     const state = game.state();
+    if (state.phase === "Hunter") {
+      this.shoot(seat, target);
+      this.advance();
+      return;
+    }
     if (state.phase === "Night") {
       switch (game.roleOf(seat)) {
         case "Doctor":
@@ -203,6 +208,13 @@ export class SlackGame {
     while (this.lobby.game) {
       const game = this.lobby.game;
       const state = game.state();
+      if (state.phase === "Hunter") {
+        const hunter = state.pendingActors[0]!;
+        if (!this.isBot(hunter)) return;
+        this.shoot(hunter, pick(this.rng, livingIds(state)));
+        humanVote = null;
+        continue;
+      }
       if (state.phase === "Day") {
         if (state.majorityTarget == null) {
           const humansAlive = state.players.some((p) => p.alive && !this.isBot(p.id));
@@ -241,6 +253,13 @@ export class SlackGame {
       if (!this.resolvePhase()) return;
       humanVote = null;
     }
+  }
+
+  private shoot(hunter: number, target: number): void {
+    this.lobby.game!.hunterAction(hunter, target);
+    this.prompt = crypto.randomUUID();
+    this.elimination(target, "by the Hunter's final shot");
+    this.announcePhase();
   }
 
   private resolvePhase(): boolean {
@@ -299,7 +318,10 @@ export class SlackGame {
       this.resetLobby();
       return;
     }
-    if (state.phase === "Night") {
+    if (state.phase === "Hunter") {
+      this.publish("The Hunter has a final shot. Play pauses until they choose a target in their DMs.");
+      this.promptActors();
+    } else if (state.phase === "Night") {
       this.publish(`Night ${state.round}. The village sleeps. Players with night actions, check your DMs.`);
       this.promptActors();
     } else {
@@ -324,15 +346,17 @@ export class SlackGame {
     if (this.bots.has(user)) return;
     const state = this.lobby.game!.state();
     const seat = this.lobby.seatOf(user)!;
-    if (state.phase !== "Night" || !state.pendingActors.includes(seat)) return;
+    if (!["Night", "Hunter"].includes(state.phase) || !state.pendingActors.includes(seat)) return;
     const role = this.lobby.game!.roleOf(seat);
     const excludeSelf = role === "Werewolf" && livingWolves(state).length === 1;
     const instruction =
-      role === "Doctor"
-        ? "choose someone to protect, including yourself. Your choice is final"
-        : role === "Seer"
-          ? "choose someone to inspect. Only you will receive the result. Your choice is final"
-          : "choose the pack's target. All wolves must agree";
+      role === "Hunter"
+        ? "choose one living player for your final shot. Your choice is final"
+        : role === "Doctor"
+          ? "choose someone to protect, including yourself. Your choice is final"
+          : role === "Seer"
+            ? "choose someone to inspect. Only you will receive the result. Your choice is final"
+            : "choose the pack's target. All wolves must agree";
     this.messages.push({
       destination: "dm",
       user,
@@ -361,7 +385,9 @@ export class SlackGame {
           ? " Each night, protect one player, including yourself, from the werewolves. You win with the village."
           : role === "Seer"
             ? " Each night, inspect one player to learn privately whether they are a werewolf or innocent. You win with the village."
-            : " Find the werewolves through discussion and voting.";
+            : role === "Hunter"
+              ? " If eliminated, choose one living player to take down with your final shot. You win with the village."
+              : " Find the werewolves through discussion and voting.";
     this.dm(
       user,
       `You are Player ${seat + 1}, a ${role}.${pack}${game.isAlive(seat) ? "" : " You were eliminated and are now a spectator."}`,
@@ -386,7 +412,7 @@ export class SlackGame {
     if (state.phase === "Night") {
       const player = state.players.find((player) => player.id === seat)!;
       const progress =
-        !player.alive || player.role === "Villager"
+        !player.alive || player.role === "Villager" || player.role === "Hunter"
           ? `You have no action to take on Night ${state.round}.`
           : state.pendingActors.includes(seat)
             ? `Your Night ${state.round} action is still needed. Choose using the buttons below.`
@@ -444,7 +470,12 @@ export class SlackGame {
     this.publish(
       `${this.mention(seat)} was eliminated ${reason}. Their role was ${this.lobby.game!.roleOf(seat)}.`,
     );
-    this.dm(this.user(seat), "You were eliminated. You can watch the game, but can no longer act or vote.");
+    this.dm(
+      this.user(seat),
+      this.lobby.game!.state().phase === "Hunter" && this.lobby.game!.roleOf(seat) === "Hunter"
+        ? "You were eliminated, but you must take your final shot. Choose a living player using the buttons."
+        : "You were eliminated. You can watch the game, but can no longer act or vote.",
+    );
   }
 
   private user(seat: number): string {

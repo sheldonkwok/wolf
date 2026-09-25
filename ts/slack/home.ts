@@ -34,14 +34,14 @@ export function registerHome(app: App, team: string, channel: string, bot: strin
             type: "section",
             text: {
               type: "mrkdwn",
-              text: "*Roles*\n• *Villager* — Find the Werewolves through discussion and daytime votes. No night action.\n• *Werewolf* — Know your pack and agree on one player to eliminate each night. Blend in during the day.\n• *Doctor* — Protect one player each night, including yourself. If the pack attacks that player, they survive.\n• *Seer* — Inspect one living player each night to privately learn whether they are a Werewolf, not their exact innocent role.",
+              text: "*Roles*\n• *Villager* — Find the Werewolves through discussion and daytime votes. No night action.\n• *Werewolf* — Know your pack and agree on one player to eliminate each night. Blend in during the day.\n• *Doctor* — Protect one player each night, including yourself. If the pack attacks that player, they survive.\n• *Seer* — Inspect one living player each night to privately learn whether they are a Werewolf, not their exact innocent role.\n• *Hunter* — When eliminated, choose one living player to take down with your final shot using DM buttons. Play and victory checks wait for your shot.",
             },
           },
           {
             type: "section",
             text: {
               type: "mrkdwn",
-              text: "*Winning*\nVillagers, the Doctor, and the Seer win together when all Werewolves are eliminated. Werewolves win when they equal or outnumber all other living players. The bot moderates; the host is a player, not a separate role.",
+              text: "*Winning*\nVillagers, the Doctor, the Seer, and the Hunter win together when all Werewolves are eliminated. Werewolves win when they equal or outnumber all other living players. The bot moderates; the host is a player, not a separate role.",
             },
           },
         ],

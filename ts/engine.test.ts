@@ -235,6 +235,23 @@ function grab(call: () => unknown): GameError {
   throw new Error("expected the call to throw");
 }
 
+test("Hunter actions and validation cross the binding, including seat zero", () => {
+  const game = Game.withRoles(["Hunter", "Werewolf", "Villager", "Villager", "Villager"]);
+  reachNight(game);
+  game.nightAction(1, 0);
+  expect(game.resolveNight()).toEqual({ kind: "Killed", killed: 0 });
+  expect(game.state().phase).toBe("Hunter");
+  expect(game.state().pendingActors).toEqual([0]);
+  expect(game.state().isOver).toBe(false);
+  const before = game.state();
+  expect(grab(() => game.hunterAction(1, 2)).code).toBe("NotPendingHunter");
+  expect(grab(() => game.hunterAction(0, 0)).code).toBe("PlayerNotAlive");
+  expect(game.state()).toEqual(before);
+  game.hunterAction(0, 1);
+  expect(game.state().winner).toBe("Villagers");
+  expect(grab(() => game.hunterAction(0, 2)).code).toBe("GameOver");
+});
+
 test("special roles cross the binding with final actions, private results, and a saved seat zero", () => {
   const game = Game.withRoles(["Doctor", "Werewolf", "Seer", "Villager", "Villager"]);
   expect(game.state().aliveVillagers).toBe(4);

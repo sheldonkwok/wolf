@@ -117,6 +117,11 @@ fn play_out(g: &mut Engine, rng: &mut Rng, unanimous_town: bool) {
                 }
                 g.resolve_day().expect("day resolves");
             }
+            Phase::Hunter => {
+                let hunter = g.pending_actors()[0];
+                let target = rng.pick(&living_ids(g));
+                g.hunter_action(hunter, target).unwrap();
+            }
             Phase::Ended => {
                 assert_winner_matches_survivors(g);
                 return;
