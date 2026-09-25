@@ -27,14 +27,14 @@ export function registerHome(app: App, team: string, channel: string, bot: strin
             type: "section",
             text: {
               type: "mrkdwn",
-              text: "*During a game*\nDiscuss and vote in the game channel during the day. Your role, night-action buttons, and the Hunter's final-shot buttons arrive privately in the *Messages* tab. DM `status` to recover your role and current prompt.",
+              text: "*During a game*\nIf a Seer is present, the opening gives them one private inspection before Day 1. Everyone else waits: no attacks, protection, or voting. Without a Seer, Day 1 starts immediately. Discuss and vote in the game channel during the day. Your role, opening and night-action buttons, and the Hunter's final-shot buttons arrive privately in the *Messages* tab. DM `status` to recover your role, private inspection history, and current prompt.",
             },
           },
           {
             type: "section",
             text: {
               type: "mrkdwn",
-              text: "*Roles*\n• *Villager* — Find the Werewolves through discussion and daytime votes. No night action.\n• *Werewolf* — Know your pack and agree on one player to eliminate each night. Blend in during the day.\n• *Doctor* — Protect one player each night, including yourself. If the pack attacks that player, they survive.\n• *Seer* — Inspect one living player each night to privately learn whether they are a Werewolf, not their exact innocent role.\n• *Hunter* — On the village team, with no night action. When eliminated by a vote or the Werewolves, choose one living player to take down using DM buttons. A saved Hunter does not shoot, and the Doctor cannot protect against the shot. Play and victory checks wait for your shot.",
+              text: "*Roles*\n• *Villager* — Find the Werewolves through discussion and daytime votes. No night action.\n• *Werewolf* — Know your pack and agree on one player to eliminate each night. Blend in during the day.\n• *Doctor* — Protect one player each night, including yourself. If the pack attacks that player, they survive.\n• *Seer* — Inspect one living player before Day 1 and each night to privately learn whether they are a Werewolf, not their exact innocent role.\n• *Hunter* — On the village team, with no night action. When eliminated by a vote or the Werewolves, choose one living player to take down using DM buttons. A saved Hunter does not shoot, and the Doctor cannot protect against the shot. Play and victory checks wait for your shot.",
             },
           },
           {

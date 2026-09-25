@@ -10,9 +10,11 @@ mod tests;
 pub use error::GameError;
 pub use player::{Player, PlayerId, Role};
 
-/// Which half of the game loop we are in.
+/// The current stage of the game.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Phase {
+    /// Only the seer inspects, before Day 1; their action starts the day.
+    Opening,
     /// Living night roles act; resolved with [`Engine::resolve_night`].
     Night,
     /// Players discuss and vote until a strict majority agrees; resolved with [`Engine::resolve_day`].
@@ -146,8 +148,12 @@ impl Engine {
             .collect();
         Engine {
             players,
-            phase: Phase::Day,
-            round: 1,
+            phase: if roles.contains(&Role::Seer) {
+                Phase::Opening
+            } else {
+                Phase::Day
+            },
+            round: if roles.contains(&Role::Seer) { 0 } else { 1 },
             winner: None,
             night_picks: BTreeMap::new(),
             doctor_picks: BTreeMap::new(),
@@ -192,13 +198,16 @@ impl Engine {
         Ok(())
     }
 
-    /// Inspect one living player once per night; reveals only werewolf versus innocent.
+    /// Inspect once before Day 1 and once per night; reveals only werewolf versus innocent.
     pub fn seer_action(
         &mut self,
         seer: PlayerId,
         target: PlayerId,
     ) -> Result<Inspection, GameError> {
-        self.ensure_phase(Phase::Night)?;
+        let opening = self.phase == Phase::Opening;
+        if !opening {
+            self.ensure_phase(Phase::Night)?;
+        }
         if self.require_alive(seer)?.role() != Role::Seer {
             return Err(GameError::NotASeer(seer));
         }
@@ -214,6 +223,11 @@ impl Engine {
         };
         self.seer_picks.insert(seer, target);
         self.inspections.push(inspection);
+        if opening {
+            self.seer_picks.clear();
+            self.phase = Phase::Day;
+            self.round = 1;
+        }
         Ok(inspection)
     }
 
@@ -301,7 +315,7 @@ impl Engine {
         self.phase
     }
 
-    /// The current round number, starting at 1 and bumped when a night resolves into a day.
+    /// The current round: 0 for the opening inspection, then 1, bumped after each night.
     pub fn round(&self) -> usize {
         self.round
     }
@@ -352,9 +366,10 @@ impl Engine {
         (villagers, wolves)
     }
 
-    /// Pending night roles at night, non-voters during the day, or nobody after ending.
+    /// Actors still needed in the current phase, or nobody after ending.
     pub fn pending_actors(&self) -> Vec<PlayerId> {
         match self.phase {
+            Phase::Opening => self.living_ids_where(|p| p.role() == Role::Seer),
             Phase::Night => self
                 .living_ids_where(|p| match p.role() {
                     Role::Werewolf => !self.night_picks.contains_key(&p.id()),

@@ -29,7 +29,7 @@ export type SlackInput = {
 } & ({ kind: "mention" | "dm"; text: string } | { kind: "choice"; value: string });
 
 const HELP =
-  "In the game channel: `@werewolf join`, `leave`, `start`, `end`, `status`, `vote @player`, or `help`. The first player is host; only the host starts or ends games. Use `@werewolf end` to cancel the game and open a fresh lobby. During the day, vote publicly with `@werewolf vote @player`. More than half of the living players must vote for the same player to eliminate them and begin night. Repeat the command to change your vote before a majority is reached. Use DM buttons for night actions and the Hunter's final shot. DM `status` to get your role and current night prompt again.";
+  "In the game channel: `@werewolf join`, `leave`, `start`, `end`, `status`, `vote @player`, or `help`. The first player is host; only the host starts or ends games. Use `@werewolf end` to cancel the game and open a fresh lobby. During the day, vote publicly with `@werewolf vote @player`. More than half of the living players must vote for the same player to eliminate them and begin night. Repeat the command to change your vote before a majority is reached. If there is a Seer, they privately inspect one player in the opening before Day 1; everyone else waits, with no attacks, protection, or voting. Without a Seer, Day 1 starts immediately. Use DM buttons for opening and night actions and the Hunter's final shot. DM `status` to get your role, inspection history, and current prompt again.";
 
 export class SlackGame {
   private readonly seen = new Set<string>();
@@ -183,6 +183,17 @@ export class SlackGame {
       this.advance();
       return;
     }
+    if (state.phase === "Opening") {
+      const result = game.seerAction(seat, target);
+      this.dm(
+        user,
+        `Your opening inspection: ${this.mention(result.target)} is ${result.isWerewolf ? "a Werewolf" : "innocent"}.`,
+      );
+      this.prompt = crypto.randomUUID();
+      this.announcePhase();
+      this.advance();
+      return;
+    }
     if (state.phase === "Night") {
       switch (game.roleOf(seat)) {
         case "Doctor":
@@ -212,6 +223,15 @@ export class SlackGame {
         const hunter = state.pendingActors[0]!;
         if (!this.isBot(hunter)) return;
         this.shoot(hunter, pick(this.rng, livingIds(state)));
+        humanVote = null;
+        continue;
+      }
+      if (state.phase === "Opening") {
+        const seer = state.pendingActors[0]!;
+        if (!this.isBot(seer)) return;
+        game.seerAction(seer, randomLivingOther(state, this.rng, seer));
+        this.prompt = crypto.randomUUID();
+        this.announcePhase();
         humanVote = null;
         continue;
       }
@@ -321,6 +341,11 @@ export class SlackGame {
     if (state.phase === "Hunter") {
       this.publish("The Hunter has a final shot. Play pauses until they choose a target in their DMs.");
       this.promptActors();
+    } else if (state.phase === "Opening") {
+      this.publish(
+        "Opening before Day 1. The Seer inspects one player privately. Everyone else waits; no attacks, protection, or voting. Check your DMs.",
+      );
+      this.promptActors();
     } else if (state.phase === "Night") {
       this.publish(`Night ${state.round}. The village sleeps. Players with night actions, check your DMs.`);
       this.promptActors();
@@ -346,7 +371,7 @@ export class SlackGame {
     if (this.bots.has(user)) return;
     const state = this.lobby.game!.state();
     const seat = this.lobby.seatOf(user)!;
-    if (!["Night", "Hunter"].includes(state.phase) || !state.pendingActors.includes(seat)) return;
+    if (!["Opening", "Night", "Hunter"].includes(state.phase) || !state.pendingActors.includes(seat)) return;
     const role = this.lobby.game!.roleOf(seat);
     const excludeSelf = role === "Werewolf" && livingWolves(state).length === 1;
     const instruction =
@@ -360,7 +385,7 @@ export class SlackGame {
     this.messages.push({
       destination: "dm",
       user,
-      text: `${state.phase} ${state.round}: ${instruction}.\n${this.livingRoster()}`,
+      text: `${state.phase === "Opening" ? "Opening before Day 1" : `${state.phase} ${state.round}`}: ${instruction}.\n${this.livingRoster()}`,
       choices: state.players
         .filter((p) => p.alive && (!excludeSelf || p.id !== seat))
         .map((p) => ({
@@ -384,7 +409,7 @@ export class SlackGame {
         : role === "Doctor"
           ? " Each night, protect one player, including yourself, from the werewolves. You win with the village."
           : role === "Seer"
-            ? " Each night, inspect one player to learn privately whether they are a werewolf or innocent. You win with the village."
+            ? " Before Day 1, inspect one living player privately in the opening while everyone else waits. Each night, inspect one player to learn privately whether they are a werewolf or innocent. You win with the village."
             : role === "Hunter"
               ? " If eliminated, choose one living player to take down with your final shot. You win with the village."
               : " Find the werewolves through discussion and voting.";
@@ -404,11 +429,19 @@ export class SlackGame {
     for (const result of this.lobby.game.state().inspections.filter((result) => result.seer === seat)) {
       this.dm(
         user,
-        `Night ${result.round} inspection: ${this.mention(result.target)} is ${result.isWerewolf ? "a Werewolf" : "innocent"}.`,
+        `${result.round === 0 ? "Opening" : `Night ${result.round}`} inspection: ${this.mention(result.target)} is ${result.isWerewolf ? "a Werewolf" : "innocent"}.`,
       );
     }
     this.dm(user, this.status());
     const state = this.lobby.game.state();
+    if (state.phase === "Opening") {
+      this.dm(
+        user,
+        state.pendingActors.includes(seat)
+          ? "Your opening inspection is still needed. Choose using the buttons below to begin Day 1."
+          : "You have no opening action. Waiting for the private inspection before Day 1.",
+      );
+    }
     if (state.phase === "Night") {
       const player = state.players.find((player) => player.id === seat)!;
       const progress =
@@ -431,7 +464,12 @@ export class SlackGame {
       state.phase === "Night"
         ? "\nNight ends automatically once all living players with night actions have submitted their choices. DM `status` to check your own action or get your buttons again."
         : "";
-    return `${state.phase} ${state.round}.\n${this.livingRoster()}${votes}${night}`;
+    const phase = state.phase === "Opening" ? "Opening before Day 1" : `${state.phase} ${state.round}`;
+    const opening =
+      state.phase === "Opening"
+        ? "\nWaiting for the private opening inspection. No attacks, protection, or voting. DM `status` for your current prompt."
+        : "";
+    return `${phase}.\n${this.livingRoster()}${votes}${night}${opening}`;
   }
 
   private voteLeaderboard(): string {

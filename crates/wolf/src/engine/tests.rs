@@ -11,6 +11,7 @@ use Role::{Villager as V, Werewolf as W};
 fn night_game(roles: &[Role]) -> Engine {
     let mut g = Engine::with_roles(roles).expect("roster should be valid");
     g.phase = Phase::Night;
+    g.round = 1;
     g
 }
 
@@ -129,8 +130,12 @@ fn werewolf_count_scales_with_player_count() {
         );
         assert_eq!(g.players().len(), players);
         assert!(g.players().iter().all(|p| p.is_alive()));
-        assert_eq!(g.phase(), Phase::Day);
-        assert_eq!(g.round(), 1);
+        let has_seer = g.players().iter().any(|p| p.role() == Role::Seer);
+        assert_eq!(
+            g.phase(),
+            if has_seer { Phase::Opening } else { Phase::Day }
+        );
+        assert_eq!(g.round(), if has_seer { 0 } else { 1 });
         assert_eq!(g.winner(), None);
         assert!(!g.is_over());
     }
@@ -215,7 +220,11 @@ fn with_seed_is_reproducible_and_seed_sensitive() {
     for seed in 0..50 {
         let g = Engine::with_seed(9, seed).unwrap();
         assert_eq!(g.alive_count_by_role(), (6, 3));
-        assert_eq!(g.phase(), Phase::Day);
+        let has_seer = g.players().iter().any(|p| p.role() == Role::Seer);
+        assert_eq!(
+            g.phase(),
+            if has_seer { Phase::Opening } else { Phase::Day }
+        );
     }
 }
 
@@ -727,6 +736,90 @@ fn doctor_can_save_any_role_including_self_and_protection_expires() {
         g.seer_action(p(2), p(1)).unwrap();
         assert_eq!(wolves_kill(&mut g, p(3)), NightOutcome::Killed(p(3)));
     }
+}
+
+#[test]
+fn opening_inspection_starts_day_one_without_eliminations() {
+    for (target, is_werewolf) in [(p(0), true), (p(1), false), (p(2), false)] {
+        let mut g = Engine::with_roles(&[W, Role::Doctor, Role::Seer, V, V, V]).unwrap();
+        assert_eq!(g.phase(), Phase::Opening);
+        assert_eq!(g.round(), 0);
+        assert_eq!(g.pending_actors(), vec![p(2)]);
+        let result = g.seer_action(p(2), target).unwrap();
+        assert_eq!(
+            result,
+            Inspection {
+                seer: p(2),
+                target,
+                round: 0,
+                is_werewolf
+            }
+        );
+        assert_eq!(g.phase(), Phase::Day);
+        assert_eq!(g.round(), 1);
+        assert_eq!(g.alive().count(), 6);
+        assert_eq!(g.pending_actors(), living_ids(&g));
+        assert_eq!(g.inspections(), &[result]);
+        assert!(g.current_votes().is_empty());
+        assert!(g.current_night_picks().is_empty());
+        assert!(g.current_doctor_picks().is_empty());
+        assert!(matches!(
+            g.seer_action(p(2), p(0)),
+            Err(GameError::WrongPhase { .. })
+        ));
+        town_lynches(&mut g, p(5));
+        assert_eq!(g.round(), 1);
+        let next = g.seer_action(p(2), p(0)).unwrap();
+        assert_eq!(next.round, 1);
+        g.night_action(p(0), p(1)).unwrap();
+        g.doctor_action(p(1), p(1)).unwrap();
+        assert_eq!(g.resolve_night(), Ok(NightOutcome::Saved(p(1))));
+        assert_eq!(g.phase(), Phase::Day);
+        assert_eq!(g.round(), 2);
+        assert_eq!(g.inspections(), &[result, next]);
+    }
+}
+
+#[test]
+fn opening_rejects_other_actions_and_invalid_inspections_without_mutation() {
+    let mut g = Engine::with_roles(&[W, Role::Doctor, Role::Seer, V, V]).unwrap();
+    let before = g.clone();
+    for result in [
+        g.vote(p(0), p(3)),
+        g.night_action(p(0), p(3)),
+        g.doctor_action(p(1), p(3)),
+        g.hunter_action(p(3), p(0)),
+    ] {
+        assert!(matches!(
+            result,
+            Err(GameError::WrongPhase {
+                actual: Phase::Opening,
+                ..
+            })
+        ));
+    }
+    assert!(matches!(g.resolve_day(), Err(GameError::WrongPhase { .. })));
+    assert!(matches!(
+        g.resolve_night(),
+        Err(GameError::WrongPhase { .. })
+    ));
+    for (actor, target, error) in [
+        (p(0), p(3), GameError::NotASeer(p(0))),
+        (p(99), p(3), GameError::UnknownPlayer(p(99))),
+        (p(2), p(99), GameError::UnknownPlayer(p(99))),
+    ] {
+        assert_eq!(g.seer_action(actor, target), Err(error));
+        assert_eq!(g, before);
+    }
+}
+
+#[test]
+fn games_without_a_seer_start_on_day_one() {
+    let g = Engine::with_roles(&[W, Role::Doctor, Role::Hunter, V, V]).unwrap();
+    assert_eq!(g.phase(), Phase::Day);
+    assert_eq!(g.round(), 1);
+    assert_eq!(g.pending_actors(), living_ids(&g));
+    assert!(g.inspections().is_empty());
 }
 
 #[test]

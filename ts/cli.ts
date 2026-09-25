@@ -197,6 +197,21 @@ class Table {
     banner(title, this.state(), this.reveal);
   }
 
+  private async runOpening(): Promise<boolean> {
+    this.drawBanner("Opening inspection — before Day 1");
+    const seer = this.state().pendingActors[0]!;
+    const target =
+      seer === this.me
+        ? await this.promptPlayer("Seer, inspect one player before Day 1 begins.", livingIds(this.state()))
+        : randomLivingOther(this.state(), this.rng, seer);
+    if (target === null) return false;
+    const result = this.game.seerAction(seer, target);
+    if (seer === this.me)
+      console.log(`${nameOf(target)} is ${result.isWerewolf ? "a Werewolf" : "innocent"}.`);
+    else console.log("The Seer has completed their opening inspection.");
+    return true;
+  }
+
   // One night: the pack names a victim and it is resolved.
   private async runNight(): Promise<boolean> {
     this.drawBanner(`Night ${this.state().round}`);
@@ -349,7 +364,8 @@ class Table {
     while (!this.state().isOver) {
       const phase = this.state().phase;
       let step: boolean;
-      if (phase === "Night") step = await this.runNight();
+      if (phase === "Opening") step = await this.runOpening();
+      else if (phase === "Night") step = await this.runNight();
       else if (phase === "Day") step = await this.runDay();
       else if (phase === "Hunter") step = await this.runHunter();
       else break;

@@ -42,6 +42,11 @@ test("opening Home publishes instructions only for the configured workspace and 
   expect(page).toContain("not every game includes every special role");
   expect(page).toContain("the Doctor cannot protect against the shot");
   expect(page).toContain("Play and victory checks wait for your shot");
+  expect(page).toContain("one private inspection before Day 1");
+  expect(page).toContain("no attacks, protection, or voting");
+  expect(page).toContain("Without a Seer, Day 1 starts immediately");
+  expect(page).toContain("Inspect one living player before Day 1 and each night");
+  expect(page).toContain("private inspection history");
   expect(page).toContain("*Winning*");
   await open("T1", "home");
   expect(published).toHaveLength(2);

@@ -22,6 +22,7 @@ pub enum Role {
 
 #[napi(string_enum)]
 pub enum Phase {
+    Opening,
     Night,
     Day,
     Ended,
@@ -73,6 +74,7 @@ impl From<Role> for EngineRole {
 impl From<EnginePhase> for Phase {
     fn from(p: EnginePhase) -> Self {
         match p {
+            EnginePhase::Opening => Phase::Opening,
             EnginePhase::Night => Phase::Night,
             EnginePhase::Day => Phase::Day,
             EnginePhase::Ended => Phase::Ended,

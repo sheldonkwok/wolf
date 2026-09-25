@@ -76,6 +76,11 @@ fn play_out(g: &mut Engine, rng: &mut Rng, unanimous_town: bool) {
     // A unanimous pack kills one player every night, so `players` phases is a hard ceiling.
     for _ in 0..(g.players().len() * 2 + 4) {
         match g.phase() {
+            Phase::Opening => {
+                let seer = g.pending_actors()[0];
+                let target = rng.pick(&living_ids(g));
+                g.seer_action(seer, target).unwrap();
+            }
             Phase::Night => {
                 let wolves = living_wolf_ids(g);
                 let targets: Vec<_> = living_ids(g)
