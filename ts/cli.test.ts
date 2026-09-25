@@ -71,6 +71,100 @@ describe("deadline-aware CLI input", () => {
   });
 });
 
+function day(draws: number[], followHuman = false) {
+  const source = input();
+  const game = Game.withRoles(["Villager", "Werewolf", "Villager", "Villager", "Villager"]);
+  game.resolveOpening();
+  const rng = new Rng(42n);
+  const log = spyOn(console, "log").mockImplementation(() => {});
+  const vote = spyOn(game, "vote");
+  spies.push(
+    log,
+    vote,
+    spyOn(process.stdout, "write").mockImplementation(() => true),
+    spyOn(rng, "chance").mockReturnValue(followHuman),
+    spyOn(rng, "below").mockImplementation((limit) => {
+      const draw = draws.shift();
+      if (draw === undefined || draw >= limit) throw new Error("Unexpected bot RNG draw");
+      return draw;
+    }),
+  );
+  const table = new Table(game, rng, 0, false, source.reader);
+  source.send("2\n");
+  source.close();
+  // biome-ignore lint/complexity/useLiteralKeys: Exercise this phase without running the entire interactive game.
+  return { game, log, vote, run: () => table["runDay"]() };
+}
+
+describe("CLI day resolution", () => {
+  test("a complete tied ballot starts night without a death or another prompt", async () => {
+    const session = day([2, 2, 2, 0]);
+    expect(await session.run()).toBe(true);
+    expect(session.vote.mock.calls).toEqual([
+      [0, 2],
+      [1, 3],
+      [2, 3],
+      [3, 2],
+      [4, 0],
+    ]);
+    expect(session.game.state().phase).toBe("Night");
+    expect(session.game.state().round).toBe(1);
+    expect(session.game.state().players.every((player) => player.alive)).toBe(true);
+    const output = session.log.mock.calls.flat().join("\n");
+    expect(output).toContain("The vote is tied. No one was eliminated; night falls.");
+    expect(output).not.toMatch(/was eliminated\. \(|No majority|Discuss and vote again/);
+    expect(output.match(/Who do you vote for/g)).toHaveLength(1);
+  });
+
+  test("a complete unique plurality eliminates its leader without a majority", async () => {
+    const session = day([2, 3, 2, 0]);
+    expect(await session.run()).toBe(true);
+    expect(session.vote.mock.calls).toEqual([
+      [0, 2],
+      [1, 3],
+      [2, 4],
+      [3, 2],
+      [4, 0],
+    ]);
+    expect(session.game.isAlive(2)).toBe(false);
+    expect(session.game.state().players.filter((player) => player.alive)).toHaveLength(4);
+    expect(session.game.state().phase).toBe("Night");
+    expect(session.game.state().round).toBe(1);
+    const output = session.log.mock.calls.flat().join("\n");
+    expect(output).toContain("was eliminated.");
+    expect(output).not.toContain("No majority");
+    expect(output.match(/Who do you vote for/g)).toHaveLength(1);
+  });
+
+  test("the bot loop stops once the remaining voter completes a tied ballot", async () => {
+    const session = day([2]);
+    session.game.vote(2, 3);
+    session.game.vote(3, 2);
+    session.game.vote(4, 0);
+    session.vote.mockClear();
+    expect(await session.run()).toBe(true);
+    expect(session.vote.mock.calls).toEqual([
+      [0, 2],
+      [1, 3],
+    ]);
+    expect(session.game.state().phase).toBe("Night");
+    expect(session.game.state().players.every((player) => player.alive)).toBe(true);
+  });
+
+  test("an early strict majority stops bots before the last vote", async () => {
+    const session = day([2], true);
+    expect(await session.run()).toBe(true);
+    expect(session.vote.mock.calls).toEqual([
+      [0, 2],
+      [1, 3],
+      [2, 2],
+      [3, 2],
+    ]);
+    expect(session.game.isAlive(2)).toBe(false);
+    expect(session.game.state().phase).toBe("Night");
+  });
+});
+
 describe("CLI opening", () => {
   test.each([
     ["Villager", "Werewolf", "Villager", "Villager", "Villager"],

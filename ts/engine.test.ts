@@ -116,6 +116,36 @@ test("majority crosses the binding and votes clear after resolution", () => {
   expect(grab(() => game.vote(99, 0)).code).toBe("UnknownPlayer");
 });
 
+test.each([
+  { targets: [0, 0, 0, 1, 1, 2, 2, 3], result: { kind: "Eliminated", eliminated: 0 } },
+  { targets: [0, 0, 0, 0, 1, 1, 1, 1], result: { kind: "Tied" } },
+  { targets: [0, 0, 0, 1, 1, 1, 2, 3], result: { kind: "Tied" } },
+  { targets: [0, 1, 2, 3, 4, 5, 6, 7], result: { kind: "Tied" } },
+])("complete ballots resolve through the binding: %j", ({ targets, result }) => {
+  const game = Game.withRoles([
+    "Villager",
+    "Werewolf",
+    "Villager",
+    "Villager",
+    "Villager",
+    "Villager",
+    "Villager",
+    "Villager",
+  ]);
+  game.resolveOpening();
+  for (let voter = 0; voter < targets.length - 1; voter++) game.vote(voter, targets[voter]!);
+  const before = game.state();
+  expect(grab(() => game.resolveDay()).code).toBe("NoMajority");
+  expect(game.state()).toEqual(before);
+  game.vote(7, targets[7]!);
+  expect(game.state().majorityTarget).toBeUndefined();
+  expect(game.state().pendingActors).toEqual([]);
+  expect(game.resolveDay()).toEqual(result);
+  expect(game.state()).toMatchObject({ phase: "Night", round: 1, votes: [] });
+  expect(game.state().players.filter((p) => p.alive)).toHaveLength(result.kind === "Tied" ? 8 : 7);
+  expect(grab(() => game.vote(7, 0)).code).toBe("WrongPhase");
+});
+
 test("unknown player throws UnknownPlayer", () => {
   const game = Game.withSeed(5, 1n);
   const error = grab(() => game.roleOf(99));
@@ -206,6 +236,8 @@ const malformedResults: Array<["resolveDay" | "resolveNight", unknown]> = [
   ["resolveDay", { kind: "Eliminated", eliminated: -1 }],
   ["resolveDay", { kind: "Eliminated", eliminated: 1.5 }],
   ["resolveDay", { kind: "Unexpected" }],
+  ["resolveDay", { kind: "Tied", eliminated: 0 }],
+  ["resolveDay", { kind: "Tied", eliminated: "0" }],
   ["resolveDay", null],
   ["resolveNight", { kind: "Killed", targets: [] }],
   ["resolveNight", { kind: "Killed", killed: "0", targets: [] }],

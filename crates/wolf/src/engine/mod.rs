@@ -17,7 +17,7 @@ pub enum Phase {
     Opening,
     /// Living night roles act; resolved with [`Engine::resolve_night`].
     Night,
-    /// Players discuss and vote until a strict majority agrees; resolved with [`Engine::resolve_day`].
+    /// Players vote until a strict majority or a complete ballot; resolved with [`Engine::resolve_day`].
     Day,
     /// A team has won. No further commands are accepted.
     Ended,
@@ -55,8 +55,10 @@ pub struct Inspection {
 /// The result of resolving a day.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DayOutcome {
-    /// The player with a strict majority of living players was eliminated.
+    /// The early majority or unique leader of a complete ballot was eliminated.
     Eliminated(PlayerId),
+    /// A complete ballot tied for the most votes; nobody was eliminated.
+    Tied,
 }
 
 /// The game engine and moderator: owns all state, built with [`Engine::new`] or [`Engine::with_roles`] and driven by the night/day commands.
@@ -278,13 +280,36 @@ impl Engine {
         Ok(())
     }
 
-    /// Eliminate the strict majority target and advance to night, or leave the day unchanged without a majority.
+    /// Resolve an early majority or complete ballot; a tied lead eliminates nobody and begins night.
     pub fn resolve_day(&mut self) -> Result<DayOutcome, GameError> {
         self.ensure_phase(Phase::Day)?;
-        let target = self.majority_target().ok_or(GameError::NoMajority)?;
+        let target = if let Some(target) = self.majority_target() {
+            Some(target)
+        } else {
+            if self.day_votes.len() < self.alive().count() {
+                return Err(GameError::NoMajority);
+            }
+            let mut tally = BTreeMap::new();
+            for &target in self.day_votes.values() {
+                *tally.entry(target).or_insert(0) += 1;
+            }
+            let most = tally.values().copied().max().expect("living players voted");
+            let mut leaders = tally.iter().filter(|(_, count)| **count == most);
+            let (&leader, _) = leaders.next().expect("a leading target");
+            if leaders.next().is_none() {
+                Some(leader)
+            } else {
+                None
+            }
+        };
         self.day_votes.clear();
-        self.eliminate(target, Phase::Night);
-        Ok(DayOutcome::Eliminated(target))
+        if let Some(target) = target {
+            self.eliminate(target, Phase::Night);
+            Ok(DayOutcome::Eliminated(target))
+        } else {
+            self.resume(Phase::Night);
+            Ok(DayOutcome::Tied)
+        }
     }
 
     /// The eliminated hunter must shoot one living player before victory is checked.
@@ -390,12 +415,12 @@ impl Engine {
         }
     }
 
-    /// Votes needed to eliminate a player: strictly more than half the living players.
+    /// Votes needed for an early elimination: strictly more than half the living players.
     pub fn majority_required(&self) -> usize {
         self.alive().count() / 2 + 1
     }
 
-    /// The target with a strict majority, if any; adapters can resolve immediately without waiting for all voters.
+    /// The early majority target; adapters also resolve when no day voters remain pending.
     pub fn majority_target(&self) -> Option<PlayerId> {
         let mut tally = BTreeMap::new();
         for &target in self.day_votes.values() {

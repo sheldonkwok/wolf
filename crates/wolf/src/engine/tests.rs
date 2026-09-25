@@ -591,19 +591,96 @@ fn werewolves_win_a_twelve_player_game() {
 // ---------------------------------------------------------------------------
 
 #[test]
-fn split_votes_and_a_plurality_keep_the_day_open_until_votes_change() {
-    let mut g = day_game(&[W, V, V, V, V, V]);
-    for voter in 0..6 {
-        g.vote(p(voter), p(voter)).unwrap();
+fn a_complete_ballot_eliminates_its_unique_leader_without_a_majority() {
+    let mut g = day_game(&[W, V, V, V, V, V, V, V]);
+    for (voter, target) in [3, 3, 3, 1, 1, 2, 2].into_iter().enumerate() {
+        g.vote(p(voter), p(target)).unwrap();
     }
-    for voter in [1, 2] {
-        g.vote(p(voter), p(0)).unwrap();
-    }
-    assert!(g.pending_actors().is_empty());
     let before = g.clone();
     assert_eq!(g.resolve_day(), Err(GameError::NoMajority));
     assert_eq!(g, before);
-    g.vote(p(3), p(0)).unwrap();
+    g.vote(p(7), p(4)).unwrap();
+    assert_eq!(g.majority_target(), None);
+    assert!(g.pending_actors().is_empty());
+    assert_eq!(g.resolve_day(), Ok(DayOutcome::Eliminated(p(3))));
+    assert_eq!(g.phase(), Phase::Night);
+    assert_eq!(g.round(), 1);
+    assert!(!g.is_alive(p(3)));
+    assert!(g.current_votes().is_empty());
+}
+
+#[test]
+fn tied_top_votes_eliminate_nobody_and_reset_the_ballot() {
+    for votes in [
+        [0, 0, 0, 0, 1, 1, 1, 1],
+        [0, 0, 0, 1, 1, 1, 2, 3],
+        [0, 1, 2, 3, 4, 5, 6, 7],
+    ] {
+        let mut g = day_game(&[W, Role::Hunter, V, V, V, V, V, V]);
+        for (voter, target) in votes.into_iter().enumerate() {
+            g.vote(p(voter), p(target)).unwrap();
+        }
+        assert_eq!(g.majority_target(), None);
+        assert_eq!(g.resolve_day(), Ok(DayOutcome::Tied));
+        assert_eq!(g.phase(), Phase::Night);
+        assert_eq!(g.round(), 1);
+        assert_eq!(g.alive().count(), 8);
+        assert_eq!(g.winner(), None);
+        assert!(g.current_votes().is_empty());
+        assert_eq!(g.pending_actors(), vec![p(0)]);
+        assert!(matches!(
+            g.vote(p(0), p(1)),
+            Err(GameError::WrongPhase { .. })
+        ));
+        wolves_kill(&mut g, p(7));
+        assert_eq!(g.round(), 2);
+        assert_eq!(g.pending_actors(), living_ids(&g));
+        for (voter, target) in [1, 1, 1, 2, 2, 3, 3].into_iter().enumerate() {
+            g.vote(p(voter), p(target)).unwrap();
+        }
+        assert!(g.pending_actors().is_empty());
+        assert_eq!(g.resolve_day(), Ok(DayOutcome::Eliminated(p(1))));
+        assert_eq!(g.round(), 2);
+    }
+}
+
+#[test]
+fn changed_votes_count_once_when_the_last_player_completes_the_ballot() {
+    let mut g = day_game(&[W, V, V, V, V]);
+    for (voter, target) in [0, 1, 2, 3].into_iter().enumerate() {
+        g.vote(p(voter), p(target)).unwrap();
+    }
+    g.vote(p(0), p(1)).unwrap();
+    g.vote(p(0), p(1)).unwrap();
+    assert_eq!(g.current_votes().len(), 4);
+    assert_eq!(g.resolve_day(), Err(GameError::NoMajority));
+    g.vote(p(4), p(4)).unwrap();
+    assert_eq!(g.resolve_day(), Ok(DayOutcome::Eliminated(p(1))));
+}
+
+#[test]
+fn plurality_elimination_keeps_hunter_and_victory_rules() {
+    for role in [Role::Hunter, W] {
+        let mut g = day_game(&[W, V, V, role, V, V, V, V]);
+        for (voter, target) in [3, 3, 3, 1, 1, 2, 2, 4].into_iter().enumerate() {
+            g.vote(p(voter), p(target)).unwrap();
+        }
+        assert_eq!(g.resolve_day(), Ok(DayOutcome::Eliminated(p(3))));
+        assert!(g.current_votes().is_empty());
+        if role == Role::Hunter {
+            assert_eq!(g.phase(), Phase::Hunter);
+            assert_eq!(g.pending_actors(), vec![p(3)]);
+            g.hunter_action(p(3), p(0)).unwrap();
+            assert_eq!(g.winner(), Some(Winner::Villagers));
+        } else {
+            assert_eq!(g.phase(), Phase::Night);
+            assert_eq!(g.winner(), None);
+        }
+    }
+    let mut g = day_game(&[W, V, V, V, V]);
+    for (voter, target) in [0, 0, 1, 2, 3].into_iter().enumerate() {
+        g.vote(p(voter), p(target)).unwrap();
+    }
     assert_eq!(g.resolve_day(), Ok(DayOutcome::Eliminated(p(0))));
     assert_eq!(g.winner(), Some(Winner::Villagers));
 }

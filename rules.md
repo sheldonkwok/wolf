@@ -56,9 +56,11 @@ Players discuss and vote before the first normal night. Play then alternates **D
 3. **Town Discussion:** Players discuss who seems suspicious, who might be lying, or what clues were spotted. Voting is available throughout the day, including Day 1.
 4. **The Vote:**
    * In the game channel, a living player votes with **`@werewolf vote @player`**, mentioning the player they suspect.
-   * Each living player has one vote. Repeating the command with a different target changes that vote until a majority is reached.
+   * Each living player has one vote. Repeating the command with a different target changes that vote until the day resolves.
    * As soon as **more than half of the living players** vote for the same player (for example, 4 of 7 or 4 of 6), that player is eliminated and their role is revealed. There is no need to wait for everyone to vote.
-   * A split vote keeps the day open for discussion and vote changes. Votes reset each day.
+   * Otherwise, as soon as **every living player has voted**, the player with the **most votes** is eliminated and their role is revealed, even without a majority.
+   * If two or more players tie for the most votes after everyone has voted, **nobody is eliminated** and night begins. A tie does not trigger a Hunter shot.
+   * Until a majority is reached or everyone has voted, discussion and vote changes remain open. Votes reset each day.
    * If neither team has won, night begins immediately with the same round number.
 
 ---

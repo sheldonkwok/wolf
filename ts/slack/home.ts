@@ -34,6 +34,13 @@ export function registerHome(app: App, team: string, channel: string, bot: strin
             type: "section",
             text: {
               type: "mrkdwn",
+              text: "*Day voting*\nVote publicly with `@werewolf vote @player`. A strict majority (more than half of living players) eliminates a player immediately. Otherwise, once every living player has voted, the player with the most votes is eliminated. A tie for the most votes eliminates nobody and night begins. You can change your vote until a majority is reached or everyone has voted. Votes reset each day.",
+            },
+          },
+          {
+            type: "section",
+            text: {
+              type: "mrkdwn",
               text: "*Roles*\n• *Villager* — Find the Werewolves through discussion and daytime votes. No night action.\n• *Werewolf* — Know your pack and agree on one player to eliminate each night. Blend in during the day.\n• *Doctor* — Protect one player each night, including yourself. If the pack attacks that player, they survive.\n• *Seer* — Inspect one living player during the timed opening before Day 1 and each night to privately learn whether they are a Werewolf, not their exact innocent role. Missing the opening deadline skips only that inspection; your Night 1 action is unaffected.\n• *Hunter* — On the village team, with no night action. When eliminated by a vote or the Werewolves, choose one living player to take down using DM buttons. A saved Hunter does not shoot, and the Doctor cannot protect against the shot. Play and victory checks wait for your shot.",
             },
           },

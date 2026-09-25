@@ -352,9 +352,10 @@ export class Table {
     console.log(`Alive: ${alive.join(", ")}`);
 
     console.log(
-      `${this.state().majorityRequired} votes for one player are needed. Votes can change until then.`,
+      `${this.state().majorityRequired} votes eliminate a player immediately. Otherwise, once everyone votes, the unique leader is eliminated; a top tie eliminates no one. Votes can change until the ballot closes.`,
     );
-    while (this.state().majorityTarget == null) {
+    const ready = () => this.state().majorityTarget != null || this.state().pendingActors.length === 0;
+    while (!ready()) {
       let myVote: number | null = null;
       if (this.iAmAlive()) {
         const picked = await this.promptPlayer("Who do you vote for?", livingIds(this.state()));
@@ -363,10 +364,11 @@ export class Table {
         this.game.vote(this.me, picked);
         console.log(`${nameOf(this.me)} → ${nameOf(picked)}`);
       }
+      if (ready()) break;
       const wolfTarget =
         this.iAmAlive() && this.iAmWolf() ? myVote! : randomLivingVillager(this.state(), this.rng);
       for (const id of livingIds(this.state()).filter((id) => id !== this.me)) {
-        if (this.state().majorityTarget != null) break;
+        if (ready()) break;
         const target =
           !this.iAmAlive() || isWolf(this.state(), id)
             ? wolfTarget
@@ -374,12 +376,15 @@ export class Table {
         this.game.vote(id, target);
         console.log(`${nameOf(id)} → ${nameOf(target)}`);
       }
-      if (this.state().majorityTarget == null) console.log("No majority yet. Discuss and vote again.");
     }
     const outcome = this.game.resolveDay();
-    console.log(
-      `${nameOf(outcome.eliminated)} was eliminated. (${roleTag(this.game.roleOf(outcome.eliminated))})`,
-    );
+    if (outcome.kind === "Eliminated") {
+      console.log(
+        `${nameOf(outcome.eliminated)} was eliminated. (${roleTag(this.game.roleOf(outcome.eliminated))})`,
+      );
+    } else {
+      console.log("The vote is tied. No one was eliminated; night falls.");
+    }
 
     if (!this.iAmAlive()) await this.waitForEnter();
     return true;

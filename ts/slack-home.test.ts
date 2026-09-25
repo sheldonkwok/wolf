@@ -52,6 +52,13 @@ test("opening Home publishes instructions only for the configured workspace and 
   expect(page).toContain("Missing the opening deadline skips only that inspection");
   expect(page).not.toContain("Without a Seer, Day 1 starts immediately");
   expect(page).toContain("private inspection history");
+  expect(page).toContain("*Day voting*");
+  expect(page).toContain(
+    "A strict majority (more than half of living players) eliminates a player immediately",
+  );
+  expect(page).toContain("once every living player has voted, the player with the most votes is eliminated");
+  expect(page).toContain("A tie for the most votes eliminates nobody and night begins");
+  expect(page).toContain("change your vote until a majority is reached or everyone has voted");
   expect(page).toContain("*Winning*");
   await open("T1", "home");
   expect(published).toHaveLength(2);

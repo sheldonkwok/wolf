@@ -29,7 +29,7 @@ export type SlackInput = {
 } & ({ kind: "mention" | "dm"; text: string } | { kind: "choice"; value: string });
 
 const HELP =
-  "In the game channel: `@werewolf join`, `leave`, `start`, `end`, `status`, `vote @player`, or `help`. The first player is host; only the host starts or ends games. Use `@werewolf end` to cancel the game and open a fresh lobby. During the day, vote publicly with `@werewolf vote @player`. More than half of the living players must vote for the same player to eliminate them and begin night. Repeat the command to change your vote before a majority is reached. Every game starts with a random 60–120 second opening before Day 1, with no attacks, protection, or voting. A Seer may privately inspect one player before the deadline; missed inspections are skipped. The opening never ends early. Use DM buttons for opening and night actions and the Hunter's final shot. DM `status` to get your role, inspection history, and current prompt again.";
+  "In the game channel: `@werewolf join`, `leave`, `start`, `end`, `status`, `vote @player`, or `help`. The first player is host; only the host starts or ends games. Use `@werewolf end` to cancel the game and open a fresh lobby. During the day, vote publicly with `@werewolf vote @player`. A strict majority (more than half of living players) eliminates a player early. Otherwise, once all living players vote, the unique leader (plurality) is eliminated; a tie for the most votes eliminates nobody. Night then begins. Repeat the command to change your vote before a majority is reached or everyone has voted. Every game starts with a random 60–120 second opening before Day 1, with no attacks, protection, or voting. A Seer may privately inspect one player before the deadline; missed inspections are skipped. The opening never ends early. Use DM buttons for opening and night actions and the Hunter's final shot. DM `status` to get your role, inspection history, and current prompt again.";
 
 export class SlackGame {
   private readonly seen = new Set<string>();
@@ -181,7 +181,7 @@ export class SlackGame {
     const state = this.lobby.game!.state();
     const count = state.votes.filter((v) => v.target === target).length;
     this.publish(
-      `${this.mention(seat)} voted for ${this.mention(target)} (${count}/${state.majorityRequired} votes needed).`,
+      `${this.mention(seat)} voted for ${this.mention(target)} (${count}/${state.majorityRequired} votes for an early majority).`,
     );
   }
 
@@ -251,7 +251,7 @@ export class SlackGame {
         return;
       }
       if (state.phase === "Day") {
-        if (state.majorityTarget == null) {
+        if (state.majorityTarget == null && state.pendingActors.length > 0) {
           const humansAlive = state.players.some((p) => p.alive && !this.isBot(p.id));
           if (humansAlive && humanVote === null) return;
           const wolfVote = state.votes.find(
@@ -265,9 +265,11 @@ export class SlackGame {
                 : villagerBotVote(state, this.rng, humanVote, player.id);
             game.vote(player.id, target);
             this.announceVote(player.id, target);
-            if (game.state().majorityTarget != null) break;
+            const ballot = game.state();
+            if (ballot.majorityTarget != null || ballot.pendingActors.length === 0) break;
           }
-          if (game.state().majorityTarget == null) return;
+          const ballot = game.state();
+          if (ballot.majorityTarget == null && ballot.pendingActors.length > 0) return;
         }
       } else {
         if (state.pendingActors.some((seat) => !this.isBot(seat))) return;
@@ -322,7 +324,8 @@ export class SlackGame {
     } else {
       const result = game.resolveDay();
       this.prompt = crypto.randomUUID();
-      this.elimination(result.eliminated, "by the village");
+      if (result.kind === "Tied") this.publish("The most votes are tied. No one was eliminated.");
+      else this.elimination(result.eliminated, "by the village");
     }
     this.announcePhase();
     return true;
@@ -366,7 +369,7 @@ export class SlackGame {
       this.promptActors();
     } else {
       this.publish(
-        `Day ${state.round}. Discuss in <#${this.channel}> and vote with \`@werewolf vote @player\`. A player is eliminated as soon as ${state.majorityRequired} living players vote for them. You can change your vote until then.${this.dev ? " To target a dev bot, use its player number: @werewolf vote 3." : ""}\n${this.livingRoster()}`,
+        `Day ${state.round}. Discuss in <#${this.channel}> and vote with \`@werewolf vote @player\`. A strict majority of ${state.majorityRequired} votes eliminates a player early. Otherwise, once all living players vote, the unique leader (plurality) is eliminated; a tie for the most votes eliminates nobody. Night then begins. You can change your vote until a majority is reached or everyone has voted.${this.dev ? " To target a dev bot, use its player number: @werewolf vote 3." : ""}\n${this.livingRoster()}`,
       );
     }
   }
@@ -507,7 +510,7 @@ export class SlackGame {
             .map((voter) => this.mention(voter))
             .join(", ")}`,
       );
-    return `Vote leaderboard (${state.majorityRequired} needed):\n${rows.length ? rows.join("\n") : "No votes yet."}`;
+    return `Vote leaderboard (${state.majorityRequired} for an early majority; all living players voted: unique plurality is eliminated, top tie eliminates nobody):\n${rows.length ? rows.join("\n") : "No votes yet."}`;
   }
 
   private roster(): string {

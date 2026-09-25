@@ -574,13 +574,15 @@ test("event retries cannot replay a command or cross into another game", () => {
 test("day status groups votes into a descending leaderboard with stable ties", () => {
   const t = table();
   t.command("start");
-  expect(t.command("status")[0]?.text).toContain("Vote leaderboard (5 needed):\nNo votes yet.");
+  expect(t.command("status")[0]?.text).toContain(
+    "Vote leaderboard (5 for an early majority; all living players voted: unique plurality is eliminated, top tie eliminates nobody):\nNo votes yet.",
+  );
   t.vote(0, 4);
   t.vote(3, 6);
   t.vote(1, 6);
   t.vote(2, 5);
   const leaderboard =
-    "Vote leaderboard (5 needed):\n• <@U6> — 2 votes\n  Voters: <@U1>, <@U3>\n• <@U4> — 1 vote\n  Voters: <@U0>\n• <@U5> — 1 vote\n  Voters: <@U2>";
+    "Vote leaderboard (5 for an early majority; all living players voted: unique plurality is eliminated, top tie eliminates nobody):\n• <@U6> — 2 votes\n  Voters: <@U1>, <@U3>\n• <@U4> — 1 vote\n  Voters: <@U0>\n• <@U5> — 1 vote\n  Voters: <@U2>";
   expect(t.command("status")[0]?.text).toContain(leaderboard);
   expect(t.dm("U0").some((m) => m.text.includes(leaderboard))).toBe(true);
   t.vote(0, 6);
@@ -606,7 +608,7 @@ test("public votes resolve immediately at a strict living majority on every day"
       const output = t.command(` VoTe <@U${target}> `, `U${voter}`);
       expect(output[0]).toEqual({
         destination: "channel",
-        text: `<@U${voter}> voted for <@U${target}> (${voter + 1}/${required} votes needed).`,
+        text: `<@U${voter}> voted for <@U${target}> (${voter + 1}/${required} votes for an early majority).`,
       });
       if (voter + 1 < required) {
         expect(t.lobby.game!.state().phase).toBe("Day");
@@ -632,12 +634,12 @@ test("public votes resolve immediately at a strict living majority on every day"
   }
 });
 
-test("split votes stay in day, votes can change, and retries never count twice", () => {
+test("incomplete split votes stay in day, votes can change, and retries never count twice", () => {
   const t = table(6);
   t.command("start");
-  for (let seat = 0; seat < 6; seat++) t.vote(seat, seat);
+  for (let seat = 0; seat < 5; seat++) t.vote(seat, seat);
   expect(t.lobby.game!.state().phase).toBe("Day");
-  expect(t.lobby.game!.state().pendingActors).toEqual([]);
+  expect(t.lobby.game!.state().pendingActors).toEqual([5]);
   const input: SlackInput = {
     id: "vote-retry",
     kind: "mention",
@@ -652,12 +654,130 @@ test("split votes stay in day, votes can change, and retries never count twice",
   expect(t.lobby.game!.state()).toEqual(before);
   t.vote(2, 0);
   expect(t.lobby.game!.state().phase).toBe("Day");
-  expect(t.command("status")[0]?.text).toContain("4 needed");
+  expect(t.command("status")[0]?.text).toContain("4 for an early majority");
   expect(t.command("status")[0]?.text).toContain("• <@U0> — 3 votes\n  Voters: <@U0>, <@U1>, <@U2>");
   const game = t.lobby.game!;
   t.vote(3, 0);
   expect(game.isAlive(0)).toBe(false);
   expect(game.state().phase).not.toBe("Day");
+});
+
+test("completed 3-2-2-1 ballots eliminate the unique plurality and reject stale votes", () => {
+  const t = table();
+  const start = t.command("start");
+  expect(start.some((m) => m.text.includes("unique leader (plurality)"))).toBe(true);
+  expect(t.command("help")[0]?.text).toContain("tie for the most votes eliminates nobody");
+  const game = t.lobby.game!;
+  const target = game.state().players.find((p) => p.role === "Villager")!.id;
+  const others = game
+    .state()
+    .players.filter((p) => p.id !== target)
+    .map((p) => p.id);
+  const ballot = [target, target, target, others[0]!, others[0]!, others[1]!, others[1]!, others[2]!];
+  for (let voter = 0; voter < 7; voter++) t.vote(voter, ballot[voter]!);
+  expect(game.state().phase).toBe("Day");
+  expect(game.state().majorityTarget).toBeUndefined();
+  const output = t.vote(7, ballot[7]!);
+  expect(game.isAlive(target)).toBe(false);
+  expect(game.state().phase).toBe("Night");
+  expect(game.state().round).toBe(1);
+  expect(output.some((m) => m.text.includes("eliminated by the village"))).toBe(true);
+  const after = game.state();
+  expect(t.vote(0, others[0]!)[0]?.text).toContain("requires Day");
+  expect(game.state()).toEqual(after);
+});
+
+test("completed top ties with or without lower targets skip elimination and begin the same night's actions", () => {
+  for (const ballot of [
+    [0, 0, 0, 0, 1, 1, 1, 1],
+    [0, 0, 0, 1, 1, 1, 2, 3],
+  ]) {
+    const t = table();
+    t.command("start");
+    const game = t.lobby.game!;
+    for (let voter = 0; voter < 7; voter++) t.vote(voter, ballot[voter]!);
+    expect(game.state().phase).toBe("Day");
+    const output = t.vote(7, ballot[7]!);
+    expect(game.state().phase).toBe("Night");
+    expect(game.state().round).toBe(1);
+    expect(game.state().players.every((p) => p.alive)).toBe(true);
+    expect(game.state().votes).toEqual([]);
+    expect(output.some((m) => m.text.includes("No one was eliminated"))).toBe(true);
+    expect(output.some((m) => m.text.startsWith("Night 1."))).toBe(true);
+    expect(output.some((m) => m.choices)).toBe(true);
+    expect(output.some((m) => m.text.includes("eliminated by the village"))).toBe(false);
+    expect(output.some((m) => m.text.startsWith("You were eliminated"))).toBe(false);
+    expect(t.vote(0, 1)[0]?.text).toContain("requires Day");
+  }
+});
+
+test("changed votes count once toward a completed plurality ballot", () => {
+  const t = table();
+  t.command("start");
+  const game = t.lobby.game!;
+  const target = game.state().players.find((p) => p.role === "Villager")!.id;
+  const others = game
+    .state()
+    .players.filter((p) => p.id !== target)
+    .map((p) => p.id);
+  t.vote(0, others[0]!);
+  t.vote(0, target);
+  t.vote(0, target);
+  expect(game.state().votes).toEqual([{ voter: 0, target }]);
+  expect(game.state().pendingActors).toHaveLength(7);
+  const ballot = [target, target, others[0]!, others[0]!, others[1]!, others[1]!, others[2]!];
+  ballot.forEach((choice, index) => {
+    t.vote(index + 1, choice);
+  });
+  expect(game.isAlive(target)).toBe(false);
+  expect(game.state().phase).toBe("Night");
+});
+
+test("Hunter eliminated by plurality pauses for a final shot", () => {
+  const t = table(5, 42n);
+  t.command("start");
+  const game = t.lobby.game!;
+  const hunter = game.state().players.find((p) => p.role === "Hunter")!.id;
+  const others = game
+    .state()
+    .players.filter((p) => p.id !== hunter)
+    .map((p) => p.id);
+  const ballot = [hunter, hunter, others[0]!, others[1]!, others[2]!];
+  ballot.forEach((target, voter) => {
+    t.vote(voter, target);
+  });
+  expect(game.state().phase).toBe("Hunter");
+  expect(game.isAlive(hunter)).toBe(false);
+  expect(t.value(`U${hunter}`, others[0]!)).toBeDefined();
+  const target = game.state().players.find((p) => p.alive && p.role !== "Werewolf")!.id;
+  const shot = t.choose(hunter, target);
+  expect(shot.some((m) => m.text.includes("Hunter's final shot"))).toBe(true);
+  expect(game.isAlive(target)).toBe(false);
+  expect(game.state().phase).toBe("Night");
+});
+
+test("subsequent completed ballots require only living voters", () => {
+  const t = table();
+  t.command("start");
+  reachNight(t);
+  morning(t);
+  const game = t.lobby.game!;
+  const living = game
+    .state()
+    .players.filter((p) => p.alive)
+    .map((p) => p.id);
+  expect(living).toHaveLength(6);
+  for (const voter of living.slice(0, -1)) t.vote(voter, voter);
+  expect(game.state().pendingActors).toEqual([living.at(-1)!]);
+  t.vote(living.at(-1)!, living.at(-1)!);
+  expect(game.state().phase).toBe("Night");
+  expect(game.state().round).toBe(2);
+  expect(
+    game
+      .state()
+      .players.filter((p) => p.alive)
+      .map((p) => p.id),
+  ).toEqual(living);
 });
 
 test("day voting requires one valid channel mention from a living player", () => {
@@ -927,6 +1047,22 @@ test("dev mode requires a human host and advertises solo play", () => {
   expect(t.command("status")[0]?.text).toContain("minimum 1 human");
   expect(t.command("start", "OUTSIDER")[0]?.text).toContain("Only the host");
   expect(t.lobby.size).toBe(1);
+});
+
+test("dev bots cannot revote after the last human completes a tied ballot", () => {
+  const t = table(4, 1n, true);
+  t.command("start");
+  const game = t.lobby.game!;
+  game.vote(0, 0);
+  game.vote(1, 0);
+  game.vote(2, 1);
+  game.vote(4, 2);
+  const output = t.vote(3, 1);
+  expect(output.filter((m) => m.text.includes("voted for"))).toHaveLength(1);
+  expect(output.some((m) => m.text.includes("No one was eliminated"))).toBe(true);
+  expect(output.some((m) => m.text.startsWith("Night 1."))).toBe(true);
+  expect(game.state().phase).toBe("Night");
+  expect(game.state().players.every((p) => p.alive)).toBe(true);
 });
 
 test("dev games fill with bots, wait for humans, finish after elimination, and clean up for replay", () => {

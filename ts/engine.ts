@@ -74,7 +74,7 @@ export type NightResolution =
   | { kind: "Saved"; saved: number }
   | { kind: "NoConsensus"; targets: number[] };
 
-export type DayResolution = { kind: "Eliminated"; eliminated: number };
+export type DayResolution = { kind: "Eliminated"; eliminated: number } | { kind: "Tied" };
 
 function isSeat(value: unknown): value is number {
   return typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
@@ -94,6 +94,7 @@ function normalizeNight(result: NightResult): NightResolution {
 }
 
 function normalizeDay(result: DayResult): DayResolution {
+  if (result?.kind === "Tied" && result.eliminated == null) return { kind: "Tied" };
   if (result?.kind === "Eliminated" && isSeat(result.eliminated)) {
     return { kind: "Eliminated", eliminated: result.eliminated };
   }

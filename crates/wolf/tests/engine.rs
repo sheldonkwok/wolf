@@ -116,12 +116,6 @@ fn play_out(g: &mut Engine, rng: &mut Rng, unanimous_town: bool) {
                     let target = rng.pick(&living);
                     g.vote(*voter, target).expect("vote");
                 }
-                if g.majority_target().is_none() {
-                    let agreed = rng.pick(&living);
-                    for voter in living.iter().take(g.majority_required()) {
-                        g.vote(*voter, agreed).expect("change vote");
-                    }
-                }
                 g.resolve_day().expect("day resolves");
             }
             Phase::Hunter => {
@@ -138,7 +132,7 @@ fn play_out(g: &mut Engine, rng: &mut Rng, unanimous_town: bool) {
     panic!("game did not end within the phase cap");
 }
 
-/// The town starts with random votes and changes votes until a majority agrees.
+/// The town completes random ballots, resolving a unique leader or a tie.
 #[test]
 fn random_town_games_always_end_with_a_consistent_winner() {
     let mut seen_villagers = false;

@@ -45,6 +45,7 @@ pub enum NightKind {
 #[napi(string_enum)]
 pub enum DayKind {
     Eliminated,
+    Tied,
 }
 
 impl From<EngineRole> for Role {
@@ -192,6 +193,10 @@ fn day_result(outcome: DayOutcome) -> DayResult {
         DayOutcome::Eliminated(id) => DayResult {
             kind: DayKind::Eliminated,
             eliminated: Some(seat(id)),
+        },
+        DayOutcome::Tied => DayResult {
+            kind: DayKind::Tied,
+            eliminated: None,
         },
     }
 }

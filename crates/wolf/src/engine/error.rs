@@ -27,7 +27,7 @@ pub enum GameError {
     WrongPhase { expected: Phase, actual: Phase },
     /// This player already used their final night action.
     AlreadyActed(PlayerId),
-    /// No target has votes from more than half of the living players.
+    /// No early majority exists and some living players have not voted yet.
     NoMajority,
     /// Resolution was attempted before every required actor had acted.
     ActionsIncomplete { waiting_on: Vec<PlayerId> },
@@ -85,7 +85,7 @@ impl fmt::Display for GameError {
             GameError::AlreadyActed(id) => write!(f, "player {id} has already acted this phase"),
             GameError::NoMajority => write!(
                 f,
-                "more than half of the living players must vote for the same target"
+                "waiting for all living players to vote or a strict majority for one target"
             ),
             GameError::ActionsIncomplete { waiting_on } => {
                 write!(f, "still waiting on {waiting_on:?}")
