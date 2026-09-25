@@ -137,6 +137,49 @@ fn werewolf_count_scales_with_player_count() {
 }
 
 #[test]
+fn special_village_roles_respect_the_cap_and_are_unique() {
+    for (players, expected) in [(5, 2), (8, 2), (12, 2), (13, 3), (16, 3), (100, 3)] {
+        for seed in 0..100 {
+            let g = Engine::with_seed(players, seed).unwrap();
+            let roles: Vec<_> = g.players().iter().map(|p| p.role()).collect();
+            let special_count = [Role::Doctor, Role::Seer, Role::Hunter]
+                .into_iter()
+                .map(|role| {
+                    let count = roles.iter().filter(|&&r| r == role).count();
+                    assert!(count <= 1);
+                    count
+                })
+                .sum::<usize>();
+            assert_eq!(special_count, expected, "players={players}, seed={seed}");
+            assert_eq!(
+                roles.iter().filter(|&&r| r == V).count(),
+                players - players / 4 - expected
+            );
+            assert!(Engine::with_roles(&roles).is_ok());
+        }
+    }
+}
+
+#[test]
+fn capped_deals_randomly_choose_every_special_role_pair() {
+    let mut pairs = BTreeSet::new();
+    for seed in 0..100 {
+        let g = Engine::with_seed(5, seed).unwrap();
+        let included = [Role::Doctor, Role::Seer, Role::Hunter]
+            .map(|role| g.players().iter().any(|p| p.role() == role));
+        pairs.insert(included);
+    }
+    assert_eq!(
+        pairs,
+        BTreeSet::from([
+            [true, true, false],
+            [true, false, true],
+            [false, true, true]
+        ])
+    );
+}
+
+#[test]
 fn random_deals_are_always_valid_and_do_reshuffle() {
     // Every deal is a legal roster with the right counts.
     let mut deals = Vec::new();
@@ -640,11 +683,11 @@ fn identical_rosters_and_commands_produce_identical_games() {
 }
 
 #[test]
-fn random_deals_include_one_doctor_and_one_seer_on_the_village_team() {
-    for count in 5..=12 {
+fn large_deals_include_all_special_roles_on_the_village_team() {
+    for count in 13..=20 {
         for seed in 0..50 {
             let g = Engine::with_seed(count, seed).unwrap();
-            for role in [Role::Doctor, Role::Seer] {
+            for role in [Role::Doctor, Role::Seer, Role::Hunter] {
                 assert_eq!(g.players().iter().filter(|p| p.role() == role).count(), 1);
             }
             assert_eq!(g.alive_count_by_role(), (count - count / 4, count / 4));

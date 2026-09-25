@@ -78,7 +78,7 @@ impl Engine {
     /// The fewest players a game can be built with.
     pub const MIN_PLAYERS: usize = 5;
 
-    /// Build a game for `player_count` players with random roles: one doctor, one seer, one hunter, `max(1, player_count / 4)` wolves, and villagers.
+    /// Deal `max(1, player_count / 4)` wolves and up to `max(2, floor(village_count * 33%))` distinct special village roles.
     pub fn new(player_count: usize) -> Result<Self, GameError> {
         Self::with_seed(player_count, time_seed())
     }
@@ -93,14 +93,19 @@ impl Engine {
         }
 
         let wolves = (player_count / 4).max(1);
+        let villagers = player_count - wolves;
+        let mut rng = SplitMix64::new(seed);
+        let mut special_roles = [Role::Doctor, Role::Seer, Role::Hunter];
+        let special_count = (villagers * 33 / 100).max(2).min(special_roles.len());
+        rng.shuffle(&mut special_roles);
         let mut roles = Vec::with_capacity(player_count);
         roles.extend(std::iter::repeat_n(Role::Werewolf, wolves));
-        roles.extend([Role::Doctor, Role::Seer, Role::Hunter]);
+        roles.extend_from_slice(&special_roles[..special_count]);
         roles.extend(std::iter::repeat_n(
             Role::Villager,
-            player_count - wolves - 3,
+            villagers - special_count,
         ));
-        SplitMix64::new(seed).shuffle(&mut roles);
+        rng.shuffle(&mut roles);
 
         Ok(Self::from_roles(&roles))
     }

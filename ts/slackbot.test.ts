@@ -15,7 +15,7 @@ class SeededLobby extends Lobby {
   }
 }
 
-function table(count = 8, seed = 42n, dev = false, recordResult?: (result: FinishedGame) => void) {
+function table(count = 8, seed = 1n, dev = false, recordResult?: (result: FinishedGame) => void) {
   const lobby = new SeededLobby(seed);
   const bot = new SlackGame("CGAME", lobby, { dev, seed, recordResult });
   let sequence = 0;
@@ -73,7 +73,7 @@ function eliminate(t: ReturnType<typeof table>, target: number): SlackMessage[] 
 }
 
 test("Hunter pauses play, recovers a private prompt, and fires exactly once", () => {
-  const t = table(5);
+  const t = table(5, 42n);
   t.command("start");
   const game = t.lobby.game!;
   const hunter = game.state().players.find((p) => p.role === "Hunter")!.id;
@@ -580,7 +580,7 @@ for (const winner of ["Villagers", "Werewolves"] as const) {
   test(`completed ${winner} wins persist the original roster, including eliminated players`, () => {
     const stats = openStats(":memory:");
     try {
-      const t = table(5, 42n, false, (result) => stats.record("TWORKSPACE", result));
+      const t = table(5, 1n, false, (result) => stats.record("TWORKSPACE", result));
       t.command("start");
       const players = t.lobby.game!.state().players;
       t.bot.saveResults();

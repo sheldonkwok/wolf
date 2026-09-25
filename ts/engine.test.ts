@@ -14,7 +14,7 @@ function reachNight(game: Game): void {
 }
 
 test("withSeed is reproducible and matches the Rust deal", () => {
-  // Seed 100 / 7 players deals the wolf to seat 5, as the Rust CLI does.
+  // Seed 100 / 7 players deals the wolf to seat 6.
   const a = Game.withSeed(7, 100n).state();
   const b = Game.withSeed(7, 100n).state();
   expect(a).toEqual(b);
@@ -24,7 +24,7 @@ test("withSeed is reproducible and matches the Rust deal", () => {
   expect(a.majorityRequired).toBe(4);
   expect(a.majorityTarget).toBeUndefined();
   expect(a.pendingActors).toEqual(a.players.map((p) => p.id));
-  expect(a.players.filter((p) => p.role === "Werewolf").map((p) => p.id)).toEqual([5]);
+  expect(a.players.filter((p) => p.role === "Werewolf").map((p) => p.id)).toEqual([6]);
 });
 
 test("Rng stream matches SplitMix64(100)", () => {
