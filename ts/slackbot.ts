@@ -3,6 +3,7 @@ import manifest from "../slack/manifest.json";
 import { openStats } from "./db/index.js";
 import { SlackDelivery } from "./slack/delivery.js";
 import { SlackGame, type SlackMessage } from "./slack/game.js";
+import { registerHome } from "./slack/home.js";
 
 export function slackArgs(argv: string[]) {
   const args = { dev: false, help: false };
@@ -110,6 +111,7 @@ async function main(): Promise<void> {
   if (!auth.user_id || !auth.team_id) throw new Error("Slack did not identify the bot or workspace.");
   const channelName = slackChannel(conversation.channel);
   const stats = openStats();
+  registerHome(app, auth.team_id, config.channel, auth.user_id);
 
   const dms = new Map<string, string>();
   const delivery = new SlackDelivery(

@@ -25,7 +25,11 @@ An installed token can have older permissions than the saved app manifest. Under
 
 Startup uses `conversations.info` to check the configured public game channel, which needs `channels:read`. Slack may list scopes for multiple conversation types in the error; you do not need to grant all of them for a public channel. If the error instead names `connections:write`, add that scope to the app-level token under **Basic Information → App-Level Tokens** and update `SLACK_APP_TOKEN` if it changes. This scope belongs to the `xapp-…` token, not the bot token.
 
-When reusing an existing Slack app, also apply the manifest's event subscriptions (`app_mention`, `message.im`), Socket Mode, interactivity, and App Home messages settings.
+When reusing an existing Slack app, also apply the manifest's event subscriptions (`app_mention`, `message.im`, `app_home_opened`), Socket Mode, interactivity, and App Home tab settings.
+
+## Home tab stays loading or blank
+
+The bot publishes a welcome page when Slack sends `app_home_opened`. For an existing app, enable **App Home → Show Tabs → Home Tab**, then add `app_home_opened` under **Event Subscriptions → Subscribe to bot events** and save. Changing the local manifest does not update the installed app. Restart the updated bot and reopen the Home tab. The bot must be running and connected to Socket Mode to publish the page; check its logs for event-handling errors if loading persists.
 
 ## Fixing `messages_tab_disabled` after starting a game
 

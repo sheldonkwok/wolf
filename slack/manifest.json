@@ -6,7 +6,11 @@
   },
   "features": {
     "bot_user": { "display_name": "Wolf", "always_online": false },
-    "app_home": { "messages_tab_enabled": true, "messages_tab_read_only_enabled": false }
+    "app_home": {
+      "home_tab_enabled": true,
+      "messages_tab_enabled": true,
+      "messages_tab_read_only_enabled": false
+    }
   },
   "oauth_config": {
     "scopes": {
@@ -14,7 +18,7 @@
     }
   },
   "settings": {
-    "event_subscriptions": { "bot_events": ["app_mention", "message.im"] },
+    "event_subscriptions": { "bot_events": ["app_mention", "message.im", "app_home_opened"] },
     "interactivity": { "is_enabled": true },
     "socket_mode_enabled": true,
     "org_deploy_enabled": false,
