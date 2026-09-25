@@ -52,6 +52,9 @@ test("opening Home publishes instructions only for the configured workspace and 
   expect(page).toContain("Missing the opening deadline skips only that inspection");
   expect(page).not.toContain("Without a Seer, Day 1 starts immediately");
   expect(page).toContain("private inspection history");
+  expect(page).toContain("night-action dropdowns");
+  expect(page).toContain("using DM dropdowns");
+  expect(page).not.toContain("buttons");
   expect(page).toContain("*Day voting*");
   expect(page).toContain(
     "A strict majority (more than half of living players) eliminates a player immediately",

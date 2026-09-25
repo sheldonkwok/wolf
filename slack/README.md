@@ -17,13 +17,15 @@ Wolf runs one game in the public `#werewolf` or `#werewolf-test` channel selecte
    bun run slackbot
    ```
 
-Slack reference: [Bolt setup and Socket Mode](https://docs.slack.dev/tools/bolt-js/creating-an-app/). The manifest requests mentions, public channel metadata, message sending, and direct message access; it does not read general channel conversations.
+Slack reference: [Bolt setup and Socket Mode](https://docs.slack.dev/tools/bolt-js/creating-an-app/). The manifest requests mentions, public channel metadata, message sending, direct message access, and user profiles (full names for DM choices); it does not read general channel conversations.
 
 ## Fixing `missing_scope`
 
-An installed token can have older permissions than the saved app manifest. Under **OAuth & Permissions → Bot Token Scopes**, ensure all five scopes from the manifest are present: `app_mentions:read`, `channels:read`, `chat:write`, `im:history`, and `im:write`. Then **Reinstall to Workspace** and ensure `.env` uses that app's installed Bot User OAuth Token. Restart with `bun run slackbot`. [Slack requires reinstalling when scopes change](https://docs.slack.dev/tools/bolt-js/creating-an-app/#subscribing-to-events).
+An installed token can have older permissions than the saved app manifest. Under **OAuth & Permissions → Bot Token Scopes**, ensure all six scopes from the manifest are present: `app_mentions:read`, `channels:read`, `chat:write`, `im:history`, `im:write`, and `users:read`. Then **Reinstall to Workspace** and ensure `.env` uses that app's installed Bot User OAuth Token. Restart with `bun run slackbot`. [Slack requires reinstalling when scopes change](https://docs.slack.dev/tools/bolt-js/creating-an-app/#subscribing-to-events).
 
 Startup uses `conversations.info` to check the configured public game channel, which needs `channels:read`. Slack may list scopes for multiple conversation types in the error; you do not need to grant all of them for a public channel. If the error instead names `connections:write`, add that scope to the app-level token under **Basic Information → App-Level Tokens** and update `SLACK_APP_TOKEN` if it changes. This scope belongs to the `xapp-…` token, not the bot token.
+
+DM choices use `users.info` with `users:read` to show full names, cached until the process restarts. Add this scope and reinstall existing apps. Failed lookups remain queued for retry; keep the process running while fixing permissions.
 
 When reusing an existing Slack app, also apply the manifest's event subscriptions (`app_mention`, `message.im`, `app_home_opened`), Socket Mode, interactivity, and App Home tab settings.
 
@@ -53,7 +55,7 @@ The repository declares `undici` directly and uses `patchedDependencies` to redi
 
 Night ends automatically after every living Werewolf, Doctor, and Seer submits an action. Eliminated players and Villagers do not need to act. With one surviving Werewolf, a Doctor, and a Seer, all three must choose before dawn, even if one is the attack target.
 
-DM `status` to the bot to check your own action. It confirms whether your action is recorded or still needed, and resends buttons when you need to choose. Use the current night's buttons; older prompts expire. The channel's `@werewolf status` keeps individual night progress private. If the bot does not respond, check its terminal for delivery or connection errors. Keep the process running to preserve the active game.
+DM `status` to the bot to check your own action. It confirms whether your action is recorded or still needed, and resends dropdowns when you need to choose. Use the current night's dropdowns; older prompts expire. The channel's `@werewolf status` keeps individual night progress private. If the bot does not respond, check its terminal for delivery or connection errors. Keep the process running to preserve the active game.
 
 ## Play
 
@@ -62,15 +64,15 @@ For solo testing, run `bun run slackbot -- --dev`, then use `@werewolf join` and
 - In your configured `#werewolf` or `#werewolf-test` channel, mention the bot: `@werewolf join`. The first player is host; 5–12 players can join.
 - `@werewolf leave` leaves a waiting lobby; if the host leaves, the next player becomes host.
 - The host uses `@werewolf start`. Everyone receives their role privately. Wolves also learn their pack. Every game has a random 60–120-second opening with everyone alive and no voting, attacks, or protection. If present, the Seer can inspect privately before the deadline; a missed inspection is skipped. Day 1 starts at the deadline regardless of whether a Seer exists or has acted, with no public inspection report. Play proceeds Day 1 → Night 1 → Day 2.
-- At night, wolves choose a numbered player in their DM. The prompt maps each number to a Slack mention. Wolves can change a choice until all have chosen. If they disagree, all choose again using new buttons.
+- At night, wolves choose a player by full name in their DM dropdown. Dev bots use their stored names. Wolves can change a choice until all have chosen. If they disagree, all choose again using new dropdowns.
 - During the day, any living player votes publicly with `@werewolf vote @player`, mentioning exactly one living player in the game. The bot announces the vote and progress toward a majority. There is no readiness step or DM elimination ballot.
 - Each living player has one vote and can change it by repeating the command with a new target until the day resolves. When more than half of the living players vote for the same target, that player is eliminated immediately. Otherwise, once every living player has voted, the player with the most votes is eliminated; a tie for the most votes eliminates nobody. Night begins unless a Hunter shot is pending or a team has won. Votes reset each day.
 - When night resolves, the channel receives the outcome and the next day’s voting prompt. The host has no special control over voting, and there is no day or night timer.
-- `@werewolf status` displays the public roster, phase, current day votes, and majority required. DM `status` to recover your role and any outstanding choice buttons. `@werewolf help` shows commands privately.
-- The host can use `@werewolf end` in the game channel to cancel an active game at any time, even if eliminated. No winner is declared; the lobby is emptied and old action buttons expire. Players must rejoin to play again.
+- `@werewolf status` displays the public roster, phase, current day votes, and majority required. DM `status` to recover your role and any outstanding choice dropdowns. `@werewolf help` shows commands privately.
+- The host can use `@werewolf end` in the game channel to cancel an active game at any time, even if eliminated. No winner is declared; the lobby is emptied and old action dropdowns expire. Players must rejoin to play again.
 - After a win, the channel gets the final roles and a new empty lobby opens. Use `@werewolf join` to play again; the first player to join becomes the new host and can use `@werewolf start` once enough players have joined.
 
-Game commands from other channels are ignored. Night choices, pack membership, and pending actor identities stay private. Stale buttons, duplicate event deliveries, outsiders, eliminated players, and duplicate votes cannot advance the game incorrectly. Target legality and outcomes are decided by the Rust engine, including its allowance for self-targets.
+Game commands from other channels are ignored. Night choices, pack membership, and pending actor identities stay private. Stale dropdowns, duplicate event deliveries, outsiders, eliminated players, and duplicate votes cannot advance the game incorrectly. Target legality and outcomes are decided by the Rust engine, including its allowance for self-targets.
 
 ## Game stats
 

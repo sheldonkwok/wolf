@@ -1,4 +1,4 @@
-import { App, type BlockAction, type ButtonAction } from "@slack/bolt";
+import { App, type BlockAction, type ButtonAction, type StaticSelectAction } from "@slack/bolt";
 import manifest from "../slack/manifest.json";
 import { openStats } from "./db/index.js";
 import { SlackDelivery } from "./slack/delivery.js";
@@ -76,18 +76,51 @@ export function slackChannel(channel?: {
   return channel.name;
 }
 
+export function choiceNameResolver(client: App["client"]) {
+  const names = new Map<string, string>();
+  return async (message: SlackMessage): Promise<SlackMessage> => {
+    if (!message.choices) return message;
+    const choices = [];
+    for (const choice of message.choices) {
+      if (!choice.slackUser) {
+        choices.push(choice);
+        continue;
+      }
+      const id = choice.slackUser;
+      let name = names.get(id);
+      if (!name) {
+        const result = await client.users.info({ user: id });
+        if (!result.ok) throw new Error(result.error ?? "Slack user lookup failed.");
+        const user = result.user;
+        name =
+          [user?.profile?.real_name, user?.real_name, user?.profile?.display_name, user?.name]
+            .map((value) => value?.trim())
+            .find((value) => value) ?? id;
+        names.set(id, name);
+      }
+      choices.push({ ...choice, label: name });
+    }
+    return { ...message, choices };
+  };
+}
+
 export function messageBlocks(message: SlackMessage) {
   if (!message.choices) return undefined;
   return [
     { type: "section", text: { type: "mrkdwn", text: message.text } },
-    ...Array.from({ length: Math.ceil(message.choices.length / 5) }, (_, index) => ({
+    ...Array.from({ length: Math.ceil(message.choices.length / 100) }, (_, index) => ({
       type: "actions",
-      elements: message.choices!.slice(index * 5, index * 5 + 5).map((choice, offset) => ({
-        type: "button",
-        action_id: `wolf_choice_${index * 5 + offset}`,
-        text: { type: "plain_text", text: choice.label },
-        value: choice.value,
-      })),
+      elements: [
+        {
+          type: "static_select",
+          action_id: `wolf_choice_${index}`,
+          placeholder: { type: "plain_text", text: "Choose a player" },
+          options: message.choices!.slice(index * 100, index * 100 + 100).map((choice) => ({
+            text: { type: "plain_text", text: Array.from(choice.label).slice(0, 75).join(""), emoji: false },
+            value: choice.value,
+          })),
+        },
+      ],
     })),
   ];
 }
@@ -114,6 +147,7 @@ async function main(): Promise<void> {
   registerHome(app, auth.team_id, config.channel, auth.user_id);
 
   const dms = new Map<string, string>();
+  const resolveChoiceNames = choiceNameResolver(app.client);
   const delivery = new SlackDelivery(
     new SlackGame(config.channel, undefined, {
       ...args,
@@ -134,7 +168,7 @@ async function main(): Promise<void> {
       const payload = {
         channel,
         text: message.text,
-        blocks: messageBlocks(message),
+        blocks: messageBlocks(await resolveChoiceNames(message)),
         unfurl_links: false,
         unfurl_media: false,
       };
@@ -197,17 +231,21 @@ async function main(): Promise<void> {
     });
   });
 
-  app.action<BlockAction<ButtonAction>>(/^wolf_choice_\d+$/, async ({ ack, body, action }) => {
-    await ack();
-    if (body.team?.id !== auth.team_id || !body.channel?.id.startsWith("D") || !action.value) return;
-    await delivery.receive({
-      id: `action:${body.user.id}:${action.action_ts}:${action.action_id}`,
-      kind: "choice",
-      user: body.user.id,
-      channel: body.channel.id,
-      value: action.value,
-    });
-  });
+  app.action<BlockAction<StaticSelectAction | ButtonAction>>(
+    /^wolf_choice_\d+$/,
+    async ({ ack, body, action }) => {
+      await ack();
+      const value = action.type === "static_select" ? action.selected_option?.value : action.value;
+      if (body.team?.id !== auth.team_id || !body.channel?.id.startsWith("D") || !value) return;
+      await delivery.receive({
+        id: `action:${body.user.id}:${action.action_ts}:${action.action_id}`,
+        kind: "choice",
+        user: body.user.id,
+        channel: body.channel.id,
+        value,
+      });
+    },
+  );
 
   app.error(async (error) => console.error(`Slack event handling failed. ${slackErrorMessage(error)}`));
   try {

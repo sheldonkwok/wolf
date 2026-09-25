@@ -47,7 +47,7 @@ function table(
   const value = (user: string, target: number) =>
     messages
       .findLast((m) => m.user === user && m.choices)
-      ?.choices?.find((c) => c.label === `Player ${target + 1}`)?.value;
+      ?.choices?.find((c) => c.label === lobby.memberAt(target)!.name)?.value;
   const choose = (seat: number, target: number) => {
     const user = lobby.memberAt(seat)!.user;
     const choice = value(user, target);
@@ -442,7 +442,7 @@ for (const count of [5, 8]) {
     const user = `U${wolf}`;
     const prompt = t.dm(user).find((m) => m.choices)!;
     expect(prompt.choices!.map((c) => c.label)).toEqual(
-      before.players.filter((p) => p.alive && p.id !== wolf).map((p) => `Player ${p.id + 1}`),
+      before.players.filter((p) => p.alive && p.id !== wolf).map((p) => `U${p.id}`),
     );
     const forged = prompt.choices![0]!.value.replace(/:\d+$/, `:${wolf}`);
     const output = t.receive({ kind: "choice", user, channel: `D${user}`, value: forged });
@@ -1177,15 +1177,21 @@ test("scope errors explain bot reinstall or app token repair without dumping API
   expect(slackErrorMessage(new Error("invalid_auth"))).toBe("invalid_auth");
 });
 
-test("Slack buttons cover all targets with unique action IDs and readable seat labels", () => {
+test("Slack dropdown covers all living targets with unchanged values and human metadata", () => {
   const t = table(12);
   t.command("start");
   reachNight(t);
   const prompt = t.messages.findLast((m) => m.choices)!;
   const blocks = messageBlocks(prompt)!;
-  const actions = blocks.slice(1) as Array<{ elements: Array<{ action_id: string; value: string }> }>;
-  expect(actions.map((block) => block.elements.length)).toEqual([5, 5, 1]);
-  expect(new Set(actions.flatMap((block) => block.elements.map((button) => button.action_id))).size).toBe(11);
+  const actions = blocks.slice(1) as Array<{
+    elements: Array<{ type: string; options: Array<{ value: string }> }>;
+  }>;
+  expect(actions).toHaveLength(1);
+  expect(actions[0]!.elements[0]!.type).toBe("static_select");
+  expect(actions[0]!.elements[0]!.options.map((option) => option.value)).toEqual(
+    prompt.choices!.map((choice) => choice.value),
+  );
+  expect(prompt.choices!.every((choice) => choice.slackUser === choice.label)).toBe(true);
   expect(prompt.text).toContain("Living players:");
 });
 
@@ -1201,7 +1207,7 @@ test("doctor saves are public without revealing the doctor and seer results rema
   const target = players.find((p) => p.alive && p.role === "Villager")!.id;
   const doctorPrompt = t.dm(`U${doctor}`).find((m) => m.choices)!;
   expect(doctorPrompt.text).toContain("protect, including yourself");
-  expect(doctorPrompt.choices!.some((c) => c.label === `Player ${doctor + 1}`)).toBe(true);
+  expect(doctorPrompt.choices!.some((c) => c.slackUser === `U${doctor}`)).toBe(true);
   const inspection = t.choose(seer, wolf);
   expect(inspection.every((m) => m.destination === "dm" && m.user === `U${seer}`)).toBe(true);
   expect(inspection.some((m) => m.text === `Your inspection: <@U${wolf}> is a Werewolf.`)).toBe(true);

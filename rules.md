@@ -35,7 +35,7 @@ The Doctor, Seer, and Hunter are all on the village team. Special roles are rand
 
 ### Hunter (Chat Game)
 
-The **Hunter** is on the village team and replaces one Villager in the chat roster. They have no night action. When eliminated by a vote or the Werewolves, they must choose one living player to eliminate with a final shot using their DM buttons. A saved Hunter does not shoot. The shot cannot be protected by the Doctor.
+The **Hunter** is on the village team and replaces one Villager in the chat roster. They have no night action. When eliminated by a vote or the Werewolves, they must choose one living player to eliminate with a final shot using their DM dropdowns. A saved Hunter does not shoot. The shot cannot be protected by the Doctor.
 
 Play pauses and victory checks wait until the shot is taken, even if the Hunter's death would give the wolves parity. After the shot, check for a winner; otherwise continue to night after a daytime elimination, or the next numbered day after a nighttime elimination. The Hunter then becomes a spectator.
 
@@ -43,7 +43,7 @@ Play pauses and victory checks wait until the shot is taken, even if the Hunter'
 
 After roles are assigned privately, **every game has a randomly timed 60–120-second opening** before Day 1, whether or not a Seer is present. The public announcement is simply that the village is settling in; neither timing nor public progress messages reveal whether a Seer exists or has acted. There are no Werewolf attacks, Doctor protection, or votes during the opening, and everyone stays alive.
 
-If present, the Seer uses DM buttons to inspect one living player (including themselves) before the deadline. Only the Seer receives whether that player is a Werewolf or innocent, not the exact innocent role. The choice is final but does not end the opening early. **Day 1 starts when the timer expires**, even if the Seer has not acted: any unsubmitted opening inspection is skipped, with no public announcement. DM `status` recovers the Seer's private inspection history, labeled **Opening**, and any current prompt.
+If present, the Seer uses DM dropdowns to inspect one living player (including themselves) before the deadline. Only the Seer receives whether that player is a Werewolf or innocent, not the exact innocent role. The choice is final but does not end the opening early. **Day 1 starts when the timer expires**, even if the Seer has not acted: any unsubmitted opening inspection is skipped, with no public announcement. DM `status` recovers the Seer's private inspection history, labeled **Opening**, and any current prompt.
 
 Players discuss and vote before the first normal night. Play then alternates **Day 1 → Night 1 → Day 2 → Night 2**, until one team wins. Taking or skipping the opening inspection does not use up the Seer's Night 1 action.
 

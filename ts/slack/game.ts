@@ -11,6 +11,7 @@ import { GameError, Rng, timeSeed } from "../engine.js";
 import { Lobby, LobbyError } from "../lobby.js";
 
 export interface Choice {
+  slackUser?: string;
   label: string;
   value: string;
 }
@@ -29,7 +30,7 @@ export type SlackInput = {
 } & ({ kind: "mention" | "dm"; text: string } | { kind: "choice"; value: string });
 
 const HELP =
-  "In the game channel: `@werewolf join`, `leave`, `start`, `end`, `status`, `vote @player`, or `help`. The first player is host; only the host starts or ends games. Use `@werewolf end` to cancel the game and open a fresh lobby. During the day, vote publicly with `@werewolf vote @player`. A strict majority (more than half of living players) eliminates a player early. Otherwise, once all living players vote, the unique leader (plurality) is eliminated; a tie for the most votes eliminates nobody. Night then begins. Repeat the command to change your vote before a majority is reached or everyone has voted. Every game starts with a random 60–120 second opening before Day 1, with no attacks, protection, or voting. A Seer may privately inspect one player before the deadline; missed inspections are skipped. The opening never ends early. Use DM buttons for opening and night actions and the Hunter's final shot. DM `status` to get your role, inspection history, and current prompt again.";
+  "In the game channel: `@werewolf join`, `leave`, `start`, `end`, `status`, `vote @player`, or `help`. The first player is host; only the host starts or ends games. Use `@werewolf end` to cancel the game and open a fresh lobby. During the day, vote publicly with `@werewolf vote @player`. A strict majority (more than half of living players) eliminates a player early. Otherwise, once all living players vote, the unique leader (plurality) is eliminated; a tie for the most votes eliminates nobody. Night then begins. Repeat the command to change your vote before a majority is reached or everyone has voted. Every game starts with a random 60–120 second opening before Day 1, with no attacks, protection, or voting. A Seer may privately inspect one player before the deadline; missed inspections are skipped. The opening never ends early. Use DM dropdowns for opening and night actions and the Hunter's final shot. DM `status` to get your role, inspection history, and current prompt again.";
 
 export class SlackGame {
   private readonly seen = new Set<string>();
@@ -408,7 +409,8 @@ export class SlackGame {
       choices: state.players
         .filter((p) => p.alive && (!excludeSelf || p.id !== seat))
         .map((p) => ({
-          label: `Player ${p.id + 1}`,
+          label: this.isBot(p.id) ? this.lobby.memberAt(p.id)!.name : this.user(p.id),
+          ...(this.isBot(p.id) ? {} : { slackUser: this.user(p.id) }),
           value: `${this.prompt}:${user}:${p.id}`,
         })),
     });
@@ -469,7 +471,7 @@ export class SlackGame {
         !player.alive || player.role === "Villager" || player.role === "Hunter"
           ? `You have no action to take on Night ${state.round}.`
           : state.pendingActors.includes(seat)
-            ? `Your Night ${state.round} action is still needed. Choose using the buttons below.`
+            ? `Your Night ${state.round} action is still needed. Choose using the dropdown below.`
             : `Your Night ${state.round} action is recorded. Waiting for the remaining night actions.`;
       this.dm(user, progress);
     }
@@ -485,7 +487,7 @@ export class SlackGame {
     }
     const night =
       state.phase === "Night"
-        ? "\nNight ends automatically once all living players with night actions have submitted their choices. DM `status` to check your own action or get your buttons again."
+        ? "\nNight ends automatically once all living players with night actions have submitted their choices. DM `status` to check your own action or get your dropdown again."
         : "";
     const phase = state.phase === "Opening" ? "Opening before Day 1" : `${state.phase} ${state.round}`;
     const opening =
@@ -538,7 +540,7 @@ export class SlackGame {
     this.dm(
       this.user(seat),
       this.lobby.game!.state().phase === "Hunter" && this.lobby.game!.roleOf(seat) === "Hunter"
-        ? "You were eliminated, but you must take your final shot. Choose a living player using the buttons."
+        ? "You were eliminated, but you must take your final shot. Choose a living player using the dropdown."
         : "You were eliminated. You can watch the game, but can no longer act or vote.",
     );
   }
