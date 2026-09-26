@@ -152,6 +152,8 @@ async function main(): Promise<void> {
     new SlackGame(config.channel, undefined, {
       ...args,
       recordResult: (result) => stats.record(auth.team_id!, result),
+      playerStats: (user) => stats.personal(auth.team_id!, config.channel, user),
+      channelStats: () => stats.channel(auth.team_id!, config.channel),
     }),
     async (message) => {
       let channel = config.channel;

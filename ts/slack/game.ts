@@ -6,9 +6,10 @@ import {
   randomLivingVillager,
   villagerBotVote,
 } from "../bots.js";
-import type { FinishedGame } from "../db/index.js";
+import type { ChannelStats, FinishedGame, PlayerStats } from "../db/index.js";
 import { GameError, Rng, timeSeed } from "../engine.js";
 import { Lobby, LobbyError } from "../lobby.js";
+import { channelStats, personalStats } from "./stats.js";
 
 export interface Choice {
   slackUser?: string;
@@ -30,7 +31,7 @@ export type SlackInput = {
 } & ({ kind: "mention" | "dm"; text: string } | { kind: "choice"; value: string });
 
 const HELP =
-  "In the game channel: `@werewolf join`, `leave`, `start`, `end`, `status`, `vote @player`, or `help`. The first player is host; only the host starts or ends games. Use `@werewolf end` to cancel the game and open a fresh lobby. During the day, vote publicly with `@werewolf vote @player`. A strict majority (more than half of living players) eliminates a player early. Otherwise, once all living players vote, the unique leader (plurality) is eliminated; a tie for the most votes eliminates nobody. Night then begins. Repeat the command to change your vote before a majority is reached or everyone has voted. Every game starts with a random 60–120 second opening before Day 1, with no attacks, protection, or voting. A Seer may privately inspect one player before the deadline; missed inspections are skipped. The opening never ends early. Use DM dropdowns for opening and night actions and the Hunter's final shot. DM `status` to get your role, inspection history, and current prompt again.";
+  "In the game channel: `@werewolf join`, `leave`, `start`, `end`, `status`, `stats`, `vote @player`, or `help`. The first player is host; only the host starts or ends games. Use `@werewolf end` to cancel the game and open a fresh lobby. During the day, vote publicly with `@werewolf vote @player`. A strict majority (more than half of living players) eliminates a player early. Otherwise, once all living players vote, the unique leader (plurality) is eliminated; a tie for the most votes eliminates nobody. Night then begins. Repeat the command to change your vote before a majority is reached or everyone has voted. Every game starts with a random 60–120 second opening before Day 1, with no attacks, protection, or voting. A Seer may privately inspect one player before the deadline; missed inspections are skipped. The opening never ends early. Use DM dropdowns for opening and night actions and the Hunter's final shot. DM `status` to get your role, inspection history, and current prompt again. DM `stats` for your lifetime wins, losses, and team breakdowns; use `@werewolf stats` in the channel for team win rates and the top 3 most frequent wolves. Stats count completed games in this channel, excluding dev games and bots.";
 
 export class SlackGame {
   private readonly seen = new Set<string>();
@@ -52,6 +53,8 @@ export class SlackGame {
       seed?: bigint;
       now?: () => number;
       recordResult?: (result: FinishedGame) => void;
+      playerStats?: (user: string) => PlayerStats;
+      channelStats?: () => ChannelStats;
     } = {},
   ) {
     this.now = options.now ?? Date.now;
@@ -92,7 +95,14 @@ export class SlackGame {
       this.expireOpening();
       if (input.kind === "choice") this.choose(input.user, input.value);
       else if (input.kind === "dm") {
-        if (/^(vote|ready)\b/i.test(input.text.trim())) {
+        if (input.text.trim().toLowerCase() === "stats") {
+          this.dm(
+            input.user,
+            this.options.playerStats
+              ? personalStats(this.channel, this.options.playerStats(input.user))
+              : "Stats are unavailable right now.",
+          );
+        } else if (/^(vote|ready)\b/i.test(input.text.trim())) {
           this.dm(input.user, `Vote in <#${this.channel}> with \`@werewolf vote @player\`.`);
         } else this.privateStatus(input.user);
       } else this.command(input.user, input.text.trim());
@@ -153,6 +163,13 @@ export class SlackGame {
         break;
       case "status":
         this.publish(this.status());
+        break;
+      case "stats":
+        this.publish(
+          this.options.channelStats
+            ? channelStats(this.channel, this.options.channelStats())
+            : "Stats are unavailable right now.",
+        );
         break;
       case "help":
       case "":

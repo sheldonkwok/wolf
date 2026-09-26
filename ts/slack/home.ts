@@ -27,6 +27,13 @@ export function registerHome(app: App, team: string, channel: string, bot: strin
             type: "section",
             text: {
               type: "mrkdwn",
+              text: "*Lifetime stats*\nDM `stats` for your wins, losses, and games played by team. In the game channel, use `@werewolf stats` for village vs. Werewolf win rates and the top 3 players by times assigned Werewolf. Only completed games in this channel count; dev games and bots are excluded. Doctor, Seer, and Hunter count as village team, and team wins count even if you were eliminated.",
+            },
+          },
+          {
+            type: "section",
+            text: {
+              type: "mrkdwn",
               text: "*During a game*\nEvery game has a randomly timed 60–120-second opening, with or without a Seer. There are no attacks, protection, or voting. If present, the Seer may make one private inspection before Day 1. Day 1 starts at the deadline, even if the Seer has not acted; their opening inspection is then skipped. Acting early does not shorten the opening, and public messages do not reveal whether a Seer exists or has acted. Discuss and vote in the game channel during the day. Your role, opening and night-action dropdowns, and the Hunter's final-shot dropdowns arrive privately in the *Messages* tab. DM `status` to recover your role, private inspection history, and current prompt.",
             },
           },

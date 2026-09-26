@@ -63,6 +63,11 @@ test("opening Home publishes instructions only for the configured workspace and 
   expect(page).toContain("A tie for the most votes eliminates nobody and night begins");
   expect(page).toContain("change your vote until a majority is reached or everyone has voted");
   expect(page).toContain("*Winning*");
+  expect(page).toContain("*Lifetime stats*");
+  expect(page).toContain("DM `stats` for your wins, losses, and games played by team");
+  expect(page).toContain("`@werewolf stats`");
+  expect(page).toContain("top 3 players by times assigned Werewolf");
+  expect(page).toContain("dev games and bots are excluded");
   await open("T1", "home");
   expect(published).toHaveLength(2);
 });

@@ -76,7 +76,9 @@ Game commands from other channels are ignored. Night choices, pack membership, a
 
 ## Game stats
 
-Completed Slack games are saved to SQLite using Drizzle and Bun's SQLite driver. `games` stores a UUID, workspace/channel IDs, start/end timestamps, winning team, and dev-mode flag. `game_players` stores every original player's Slack user ID, seat, role, and bot flag, including eliminated players. Doctor and Seer wins belong to the Villagers team. Dev games are recorded with `dev = 1`; filter them out for normal stats. Cancelled games, interrupted games, and CLI games are not recorded. There is no stats command yet.
+Completed Slack games are saved to SQLite using Drizzle and Bun's SQLite driver. `games` stores a UUID, workspace/channel IDs, start/end timestamps, winning team, and dev-mode flag. `game_players` stores every original player's Slack user ID, seat, role, and bot flag, including eliminated players. Doctor, Seer, and Hunter wins belong to the Villagers team, even if the player was eliminated. Dev games are recorded with `dev = 1` but excluded from stats. Cancelled games, interrupted games, and CLI games are not recorded.
+
+DM `stats` for your lifetime games played, wins, losses, and win rate, overall and by team. In the configured game channel, use `@werewolf stats` for lifetime village vs. Werewolf win rates and the top 3 players by number of Werewolf assignments (not wins). Stats are scoped to the configured workspace and channel and only include completed non-dev games; bots are excluded from player stats and rankings. Ranking ties are ordered by Slack user ID. With no completed games, win rates show `N/A`.
 
 Locally, `DATABASE_PATH` defaults to `./data/wolf.sqlite`; its parent directory is created automatically. The database and SQLite WAL sidecars are gitignored. Startup applies the committed migrations in `drizzle/` before accepting game commands. For schema changes, edit `ts/db/schema.ts`, run `bun run db:generate`, and commit the generated SQL and metadata. Do not edit migrations already deployed.
 
