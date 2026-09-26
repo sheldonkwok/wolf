@@ -13,11 +13,9 @@ pub use player::{Player, PlayerId, Role};
 /// The current stage of the game.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Phase {
-    /// Every game waits before Day 1; only the seer may inspect before the adapter ends the opening.
-    Opening,
     /// Living night roles act; resolved with [`Engine::resolve_night`].
     Night,
-    /// Players vote until a strict majority or a complete ballot; resolved with [`Engine::resolve_day`].
+    /// Players vote until a strict majority or a complete ballot; the seer may also inspect once on Day 1.
     Day,
     /// A team has won. No further commands are accepted.
     Ended,
@@ -49,6 +47,8 @@ pub struct Inspection {
     pub seer: PlayerId,
     pub target: PlayerId,
     pub round: usize,
+    /// [`Phase::Day`] for the Day 1 inspection, otherwise [`Phase::Night`].
+    pub phase: Phase,
     pub is_werewolf: bool,
 }
 
@@ -150,8 +150,8 @@ impl Engine {
             .collect();
         Engine {
             players,
-            phase: Phase::Opening,
-            round: 0,
+            phase: Phase::Day,
+            round: 1,
             winner: None,
             night_picks: BTreeMap::new(),
             doctor_picks: BTreeMap::new(),
@@ -196,13 +196,13 @@ impl Engine {
         Ok(())
     }
 
-    /// Inspect once before Day 1 and once per night; reveals only werewolf versus innocent.
+    /// Inspect once on Day 1 and once per night; reveals only werewolf versus innocent.
     pub fn seer_action(
         &mut self,
         seer: PlayerId,
         target: PlayerId,
     ) -> Result<Inspection, GameError> {
-        if self.phase != Phase::Opening {
+        if !self.is_day_one() {
             self.ensure_phase(Phase::Night)?;
         }
         if self.require_alive(seer)?.role() != Role::Seer {
@@ -216,20 +216,12 @@ impl Engine {
             seer,
             target,
             round: self.round,
+            phase: self.phase,
             is_werewolf,
         };
         self.seer_picks.insert(seer, target);
         self.inspections.push(inspection);
         Ok(inspection)
-    }
-
-    /// End the timed opening, skipping any unsubmitted inspection; the adapter owns the deadline.
-    pub fn resolve_opening(&mut self) -> Result<(), GameError> {
-        self.ensure_phase(Phase::Opening)?;
-        self.seer_picks.clear();
-        self.phase = Phase::Day;
-        self.round = 1;
-        Ok(())
     }
 
     /// Resolve the night: eliminate the wolves' agreed target, check for a win, advance to [`Phase::Day`] or [`Phase::Ended`].
@@ -280,7 +272,7 @@ impl Engine {
         Ok(())
     }
 
-    /// Resolve an early majority or complete ballot; a tied lead eliminates nobody and begins night.
+    /// Resolve an early majority or complete ballot, skipping any unused Day 1 inspection; a tie begins night.
     pub fn resolve_day(&mut self) -> Result<DayOutcome, GameError> {
         self.ensure_phase(Phase::Day)?;
         let target = if let Some(target) = self.majority_target() {
@@ -303,6 +295,7 @@ impl Engine {
             }
         };
         self.day_votes.clear();
+        self.seer_picks.clear();
         if let Some(target) = target {
             self.eliminate(target, Phase::Night);
             Ok(DayOutcome::Eliminated(target))
@@ -339,7 +332,7 @@ impl Engine {
         self.phase
     }
 
-    /// The current round: 0 for the opening inspection, then 1, bumped after each night.
+    /// The current round: 1 for the first day and night, bumped after each night.
     pub fn round(&self) -> usize {
         self.round
     }
@@ -393,9 +386,6 @@ impl Engine {
     /// Actors still needed in the current phase, or nobody after ending.
     pub fn pending_actors(&self) -> Vec<PlayerId> {
         match self.phase {
-            Phase::Opening => self.living_ids_where(|p| {
-                p.role() == Role::Seer && !self.seer_picks.contains_key(&p.id())
-            }),
             Phase::Night => self
                 .living_ids_where(|p| match p.role() {
                     Role::Werewolf => !self.night_picks.contains_key(&p.id()),
@@ -413,6 +403,14 @@ impl Engine {
             Phase::Hunter => vec![self.pending_hunter.expect("hunter phase has an actor").0],
             Phase::Ended => Vec::new(),
         }
+    }
+
+    /// Living seers who may still inspect now: optional on Day 1, required each night.
+    pub fn pending_inspectors(&self) -> Vec<PlayerId> {
+        if !self.is_day_one() && self.phase != Phase::Night {
+            return Vec::new();
+        }
+        self.living_ids_where(|p| p.role() == Role::Seer && !self.seer_picks.contains_key(&p.id()))
     }
 
     /// Votes needed for an early elimination: strictly more than half the living players.
@@ -481,6 +479,10 @@ impl Engine {
                 self.round += 1;
             }
         }
+    }
+
+    fn is_day_one(&self) -> bool {
+        self.phase == Phase::Day && self.round == 1
     }
 
     fn ensure_phase(&self, expected: Phase) -> Result<(), GameError> {

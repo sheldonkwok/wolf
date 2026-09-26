@@ -56,7 +56,7 @@ test("lookup errors are not cached and delivery retries without numbered fallbac
     if (++calls === 1) throw new Error("missing_scope");
     return { ok: true, user: { real_name: "Recovered Full Name" } };
   });
-  const game = { handle: () => [prompt], tick: () => [], saveResults: () => {} } as unknown as SlackGame;
+  const game = { handle: () => [prompt], saveResults: () => {} } as unknown as SlackGame;
   const sent: SlackMessage[] = [];
   const delivery = new SlackDelivery(
     game,

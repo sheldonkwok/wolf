@@ -139,10 +139,6 @@ export class Game {
     attempt(() => this.inner.hunterAction(hunter, target));
   }
 
-  resolveOpening(): void {
-    attempt(() => this.inner.resolveOpening());
-  }
-
   resolveNight(): NightResolution {
     return normalizeNight(attempt(() => this.inner.resolveNight()));
   }

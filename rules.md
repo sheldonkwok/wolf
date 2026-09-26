@@ -26,7 +26,7 @@ For the chat game, the engine is the moderator and does not take a seat. Games h
 * 🧑‍🌾 **Villagers:** The innocent townsfolk. They do not have night actions, but during the day they listen to clues, debate, and vote to catch the Werewolves.
 * 🐺 **Werewolves:** The secret villains. They wake up together each night and silently pick one player to eliminate. During the day, they blend in and pretend to be innocent Villagers.
 * 🩺 **Doctor:** The protector. Wakes up each night and chooses one player to save. If the Werewolves target that person, they are saved and stay in the game!
-* 🔮 **Seer:** The detective. May inspect one living player privately during the timed opening before Day 1, then wakes up each night to inspect one player. The opening inspection is skipped if time runs out. The Moderator secretly reveals if that person is a Werewolf or innocent.
+* 🔮 **Seer:** The detective. May inspect one living player privately during Day 1, their only daytime inspection, then wakes up each night to inspect one player. The Day 1 inspection is skipped if Day 1 ends first. The Moderator secretly reveals if that person is a Werewolf or innocent.
 * 🏹 **Hunter:** The village's last-shot defender. Has no night action, but when eliminated by a vote or the Werewolves, chooses one living player to eliminate with a final shot.
 
 The Doctor, Seer, and Hunter are all on the village team. Special roles are randomly selected, so not every game includes every role.
@@ -41,15 +41,15 @@ Play pauses and victory checks wait until the shot is taken, even if the Hunter'
 
 ## How to Play
 
-After roles are assigned privately, **every game has a randomly timed 60–120-second opening** before Day 1, whether or not a Seer is present. The public announcement is simply that the village is settling in; neither timing nor public progress messages reveal whether a Seer exists or has acted. There are no Werewolf attacks, Doctor protection, or votes during the opening, and everyone stays alive.
+After roles are assigned privately, **the game starts immediately on Day 1**. Public messages do not reveal whether a Seer exists or has acted.
 
-If present, the Seer uses DM dropdowns to inspect one living player (including themselves) before the deadline. Only the Seer receives whether that player is a Werewolf or innocent, not the exact innocent role. The choice is final but does not end the opening early. **Day 1 starts when the timer expires**, even if the Seer has not acted: any unsubmitted opening inspection is skipped, with no public announcement. DM `status` recovers the Seer's private inspection history, labeled **Opening**, and any current prompt.
+**Day 1 Seer action:** If present, the Seer may use DM dropdowns to inspect one living player (including themselves) at any time during Day 1, alongside discussion and voting. This is the **only time the Seer can inspect during the day**. Only the Seer receives whether that player is a Werewolf or innocent, not the exact innocent role. The choice is final and does not affect the vote. If Day 1 ends before the Seer acts, the Day 1 inspection is skipped with no public announcement. DM `status` recovers the Seer's private inspection history, labeled **Day 1** or **Night N**, and any current prompt.
 
-Players discuss and vote before the first normal night. Play then alternates **Day 1 → Night 1 → Day 2 → Night 2**, until one team wins. Taking or skipping the opening inspection does not use up the Seer's Night 1 action.
+Play alternates **Day 1 → Night 1 → Day 2 → Night 2**, until one team wins. Taking or skipping the Day 1 inspection does not use up the Seer's Night 1 action.
 
 ### 1. Day Phase (Eyes Open)
 
-1. **Opening Day:** The Moderator announces that the game has begun. Everyone is alive and there is no overnight report on Day 1.
+1. **Opening Day:** The Moderator announces that the game has begun. Everyone is alive and there is no overnight report on Day 1. The Seer may take their one daytime inspection now.
 2. **Later Mornings:** The Moderator announces what happened during the preceding night:
    * *If saved:* "The Werewolves attacked Alex, but the Doctor saved them! No one was eliminated."
    * *If not saved:* "Sadly, Jamie was eliminated by the Werewolves!" *(Jamie silently shows their card and becomes a quiet spectator).*

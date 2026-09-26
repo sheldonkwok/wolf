@@ -24,7 +24,7 @@ afterEach(() => {
   for (const spy of spies.splice(0)) spy.mockRestore();
 });
 
-function opening(roles: Role[]) {
+function inspection(roles: Role[]) {
   const source = input();
   const game = Game.withRoles(roles);
   const log = spyOn(console, "log").mockImplementation(() => {});
@@ -32,9 +32,9 @@ function opening(roles: Role[]) {
     log,
     spyOn(process.stdout, "write").mockImplementation(() => true),
   );
-  const table = new Table(game, new Rng(42n), 0, false, source.reader, () => 40);
-  // biome-ignore lint/complexity/useLiteralKeys: Exercise this phase without running the entire interactive game.
-  return { ...source, game, log, run: () => table["runOpening"]() };
+  const table = new Table(game, new Rng(42n), 0, false, source.reader);
+  // biome-ignore lint/complexity/useLiteralKeys: Exercise this step without running the entire interactive game.
+  return { ...source, game, log, run: () => table["runDayInspection"]() };
 }
 
 describe("deadline-aware CLI input", () => {
@@ -74,7 +74,6 @@ describe("deadline-aware CLI input", () => {
 function day(draws: number[], followHuman = false) {
   const source = input();
   const game = Game.withRoles(["Villager", "Werewolf", "Villager", "Villager", "Villager"]);
-  game.resolveOpening();
   const rng = new Rng(42n);
   const log = spyOn(console, "log").mockImplementation(() => {});
   const vote = spyOn(game, "vote");
@@ -165,47 +164,37 @@ describe("CLI day resolution", () => {
   });
 });
 
-describe("CLI opening", () => {
+describe("CLI Day 1 inspection", () => {
   test.each([
     ["Villager", "Werewolf", "Villager", "Villager", "Villager"],
     ["Villager", "Werewolf", "Seer", "Villager", "Villager"],
-    ["Seer", "Werewolf", "Villager", "Villager", "Villager"],
-  ] as Role[][])("waits the full deadline for roster %j", async (...roles) => {
-    const session = opening(roles);
-    const action = spyOn(session.game, "seerAction");
-    if (roles[0] === "Seer") session.send("1\n");
-    const start = performance.now();
-    const running = session.run();
-    await Bun.sleep(5);
-    expect(session.game.state().phase).toBe("Opening");
-    expect(action).toHaveBeenCalledTimes(roles.includes("Seer") ? 1 : 0);
-    expect(await running).toBe(true);
-    expect(performance.now() - start).toBeGreaterThanOrEqual(40);
-    expect(session.game.state().phase).toBe("Day");
-    expect(session.game.state().round).toBe(1);
-    if (roles[0] !== "Seer") {
-      const output = session.log.mock.calls.flat().join("\n");
-      expect(output).not.toMatch(/inspection|Seer/);
-    }
-    session.close();
-  });
-
-  test("a human Seer can time out after invalid input and use late input on Day 1", async () => {
-    const session = opening(["Seer", "Werewolf", "Villager", "Villager", "Villager"]);
-    const action = spyOn(session.game, "seerAction");
-    session.send("invalid\n\n99\n");
+  ] as Role[][])("only a living Seer inspects, silently for bots, in roster %j", async (...roles) => {
+    const session = inspection(roles);
     expect(await session.run()).toBe(true);
-    expect(action).not.toHaveBeenCalled();
-    expect(session.game.state().phase).toBe("Day");
-    session.send("2\n");
-    expect(await session.reader.next()).toBe("2");
+    expect(session.game.state().inspections).toHaveLength(roles.includes("Seer") ? 1 : 0);
+    expect(session.game.state().inspections.every((result) => result.phase === "Day")).toBe(true);
+    expect(session.log.mock.calls.flat().join("\n")).not.toMatch(/inspect|Seer|innocent|Werewolf/);
+    expect(await session.run()).toBe(true);
+    expect(session.game.state().inspections).toHaveLength(roles.includes("Seer") ? 1 : 0);
     session.close();
   });
 
-  test.each(["Seer", "Villager"] as Role[])("EOF exits the opening for %s", async (role) => {
-    const session = opening([role, "Werewolf", "Villager", "Villager", "Villager"]);
+  test("a human Seer retries invalid input and privately learns the result", async () => {
+    const session = inspection(["Seer", "Werewolf", "Villager", "Villager", "Villager"]);
+    session.send("invalid\n\n99\n1\n");
+    expect(await session.run()).toBe(true);
+    expect(session.game.state().inspections).toEqual([
+      { seer: 0, target: 1, round: 1, phase: "Day", isWerewolf: true },
+    ]);
+    expect(session.game.state().phase).toBe("Day");
+    expect(session.log.mock.calls.flat()).toContain("Bob is a Werewolf.");
+    session.close();
+  });
+
+  test("EOF exits at the Day 1 inspection", async () => {
+    const session = inspection(["Seer", "Werewolf", "Villager", "Villager", "Villager"]);
     session.close();
     expect(await session.run()).toBe(false);
-    expect(session.game.state().phase).toBe("Opening");
+    expect(session.game.state().inspections).toEqual([]);
   });
 });

@@ -17,9 +17,7 @@ export class SlackDelivery {
   }
 
   retry(): Promise<void> {
-    return this.enqueue(() => {
-      this.outbox.push(...this.game.tick());
-    });
+    return this.enqueue(() => {});
   }
 
   private enqueue(command: () => void): Promise<void> {
