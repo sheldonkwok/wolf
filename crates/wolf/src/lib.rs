@@ -11,9 +11,6 @@
 //!     Role::Villager, Role::Villager, Role::Werewolf,
 //! ];
 //! let mut game = Engine::with_roles(&roles).unwrap();
-//! // The adapter ends every game's opening when its 60–120-second timer expires.
-//! game.resolve_opening().unwrap();
-//!
 //! // Day 1: four of seven living players vote to eliminate wolf P0.
 //! for voter in 0..4 {
 //!     game.vote(game.player(voter), game.player(0)).unwrap();

@@ -22,7 +22,6 @@ pub enum Role {
 
 #[napi(string_enum)]
 pub enum Phase {
-    Opening,
     Night,
     Day,
     Ended,
@@ -75,7 +74,6 @@ impl From<Role> for EngineRole {
 impl From<EnginePhase> for Phase {
     fn from(p: EnginePhase) -> Self {
         match p {
-            EnginePhase::Opening => Phase::Opening,
             EnginePhase::Night => Phase::Night,
             EnginePhase::Day => Phase::Day,
             EnginePhase::Ended => Phase::Ended,
@@ -127,6 +125,7 @@ pub struct InspectionView {
     pub seer: u32,
     pub target: u32,
     pub round: u32,
+    pub phase: Phase,
     pub is_werewolf: bool,
 }
 
@@ -136,6 +135,7 @@ impl From<wolf::Inspection> for InspectionView {
             seer: seat(result.seer),
             target: seat(result.target),
             round: result.round as u32,
+            phase: result.phase.into(),
             is_werewolf: result.is_werewolf,
         }
     }
@@ -149,6 +149,7 @@ pub struct GameState {
     pub is_over: bool,
     pub players: Vec<PlayerView>,
     pub pending_actors: Vec<u32>,
+    pub pending_inspectors: Vec<u32>,
     pub majority_required: u32,
     pub majority_target: Option<u32>,
     pub votes: Vec<VoteView>,
@@ -284,12 +285,6 @@ impl Game {
             .map_err(to_js)
     }
 
-    /// End the timed opening, skipping any unsubmitted inspection.
-    #[napi]
-    pub fn resolve_opening(&mut self) -> napi::Result<()> {
-        self.inner.resolve_opening().map_err(to_js)
-    }
-
     /// Resolve the night and advance the phase.
     #[napi]
     pub fn resolve_night(&mut self) -> napi::Result<NightResult> {
@@ -346,6 +341,7 @@ impl Game {
             is_over: e.is_over(),
             players,
             pending_actors: e.pending_actors().into_iter().map(seat).collect(),
+            pending_inspectors: e.pending_inspectors().into_iter().map(seat).collect(),
             majority_required: e.majority_required() as u32,
             majority_target: e.majority_target().map(seat),
             votes: votes_to_views(e.current_votes()),

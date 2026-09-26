@@ -33,10 +33,7 @@ function playOut(game: Game): void {
   for (let i = 0; i < cap; i++) {
     const s = game.state();
     if (s.phase === "Ended") return;
-    if (s.phase === "Opening") {
-      if (s.pendingActors.length > 0) game.seerAction(s.pendingActors[0]!, 0);
-      game.resolveOpening();
-    } else if (s.phase === "Hunter") {
+    if (s.phase === "Hunter") {
       game.hunterAction(s.pendingActors[0]!, s.players.find((p) => p.alive)!.id);
     } else if (s.phase === "Night") {
       const victim = s.players.find((p) => p.alive && p.role !== "Werewolf")!.id;
@@ -181,9 +178,9 @@ test("a successful start hands over a fresh engine", () => {
   const lobby = lobbyWith(7);
   const game = lobby.startWithSeed("u0", 1n);
   expect(game.state().players.length).toBe(7);
-  expect(game.state().phase).toBe("Opening");
-  expect(game.state().round).toBe(0);
-  expect(game.state().pendingActors).toEqual([2]);
+  expect(game.state().phase).toBe("Day");
+  expect(game.state().round).toBe(1);
+  expect(game.state().pendingInspectors).toEqual([2]);
 
   expect(lobby.state).toBe("InGame");
   expect(lobby.game).not.toBeNull();

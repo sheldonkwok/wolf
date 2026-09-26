@@ -126,7 +126,6 @@ test("stats during an active game reveal no current roles and duplicate requests
     const lobby = new Lobby();
     for (let index = 0; index < 5; index++) lobby.join(`U${index}`, `Player ${index}`);
     const game = new SlackGame("C1", lobby, {
-      now: () => 0,
       playerStats: (user) => stats.personal("T1", "C1", user),
       channelStats: () => stats.channel("T1", "C1"),
     });

@@ -164,7 +164,6 @@ export class Table {
     private me: number,
     private reveal: boolean,
     private reader: LineReader,
-    private openingDurationMs = () => (60 + rng.below(61)) * 1_000,
   ) {}
 
   private state(): GameState {
@@ -180,17 +179,7 @@ export class Table {
   }
 
   // Ask the human to pick one of `choices`, accepting a seat number or a name prefix.
-  private promptPlayer(question: string, choices: number[]): Promise<number | null>;
-  private promptPlayer(
-    question: string,
-    choices: number[],
-    deadline: number,
-  ): Promise<number | null | undefined>;
-  private async promptPlayer(
-    question: string,
-    choices: number[],
-    deadline?: number,
-  ): Promise<number | null | undefined> {
+  private async promptPlayer(question: string, choices: number[]): Promise<number | null> {
     console.log(question);
     let menu = "  ";
     for (const id of choices) {
@@ -202,11 +191,9 @@ export class Table {
     console.log(menu.trimEnd());
 
     for (;;) {
-      if (deadline !== undefined && performance.now() >= deadline) return undefined;
       process.stdout.write("> ");
-      const input = await this.reader.next(deadline);
-      if (deadline !== undefined && performance.now() >= deadline) return undefined;
-      if (input === null || input === undefined) return input;
+      const input = await this.reader.next();
+      if (input === null || input === undefined) return null;
       if (input === "") continue;
 
       if (/^\d+$/.test(input)) {
@@ -228,36 +215,6 @@ export class Table {
 
   private drawBanner(title: string): void {
     banner(title, this.state(), this.reveal);
-  }
-
-  private async runOpening(): Promise<boolean> {
-    const duration = this.openingDurationMs();
-    const deadline = performance.now() + duration;
-    this.drawBanner("Opening — before Day 1");
-    console.log(`The village settles in. Day 1 begins in ${Math.ceil(duration / 1_000)} seconds.`);
-    const seer = this.state().pendingActors[0];
-    if (seer !== undefined) {
-      const target =
-        seer === this.me
-          ? await this.promptPlayer(
-              "Seer, inspect one player before Day 1 begins (optional; choose before the timer ends).",
-              livingIds(this.state()),
-              deadline,
-            )
-          : randomLivingOther(this.state(), this.rng, seer);
-      if (target === null) return false;
-      if (target !== undefined && performance.now() < deadline) {
-        const result = this.game.seerAction(seer, target);
-        if (seer === this.me)
-          console.log(`${nameOf(target)} is ${result.isWerewolf ? "a Werewolf" : "innocent"}.`);
-      }
-    }
-    while (performance.now() < deadline) {
-      const input = await this.reader.next(deadline);
-      if (input === null) return false;
-    }
-    this.game.resolveOpening();
-    return true;
   }
 
   // One night: the pack names a victim and it is resolved.
@@ -350,6 +307,7 @@ export class Table {
 
     const alive = livingIds(this.state()).map(nameOf);
     console.log(`Alive: ${alive.join(", ")}`);
+    if (!(await this.runDayInspection())) return false;
 
     console.log(
       `${this.state().majorityRequired} votes eliminate a player immediately. Otherwise, once everyone votes, the unique leader is eliminated; a top tie eliminates no one. Votes can change until the ballot closes.`,
@@ -390,6 +348,24 @@ export class Table {
     return true;
   }
 
+  // The Seer's only daytime inspection, available on Day 1.
+  private async runDayInspection(): Promise<boolean> {
+    const seer = this.state().pendingInspectors[0];
+    if (seer === undefined) return true;
+    const target =
+      seer === this.me
+        ? await this.promptPlayer(
+            "Seer, inspect one player now. This Day 1 inspection is your only daytime look.",
+            livingIds(this.state()),
+          )
+        : randomLivingOther(this.state(), this.rng, seer);
+    if (target === null) return false;
+    const result = this.game.seerAction(seer, target);
+    if (seer === this.me)
+      console.log(`${nameOf(target)} is ${result.isWerewolf ? "a Werewolf" : "innocent"}.`);
+    return true;
+  }
+
   private async runHunter(): Promise<boolean> {
     const hunter = this.state().pendingActors[0]!;
     console.log(`${nameOf(hunter)} is the Hunter and has a final shot.`);
@@ -417,8 +393,7 @@ export class Table {
     while (!this.state().isOver) {
       const phase = this.state().phase;
       let step: boolean;
-      if (phase === "Opening") step = await this.runOpening();
-      else if (phase === "Night") step = await this.runNight();
+      if (phase === "Night") step = await this.runNight();
       else if (phase === "Day") step = await this.runDay();
       else if (phase === "Hunter") step = await this.runHunter();
       else break;

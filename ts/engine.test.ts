@@ -5,11 +5,8 @@ import { Game, GameError, Rng, timeSeed } from "./engine.js";
 import { Game as NativeGame } from "./native/index.js";
 
 function reachNight(game: Game): void {
-  if (game.state().phase === "Opening") {
-    const seer = game.state().pendingActors[0];
-    if (seer !== undefined) game.seerAction(seer, 0);
-    game.resolveOpening();
-  }
+  const seer = game.state().pendingInspectors[0];
+  if (seer !== undefined) game.seerAction(seer, 0);
   const players = game.state().players.filter((p) => p.alive);
   const target = players.findLast((p) => p.role === "Villager")!.id;
   for (const player of players) game.vote(player.id, target);
@@ -23,12 +20,13 @@ test("withSeed is reproducible and matches the Rust deal", () => {
   const a = Game.withSeed(7, 100n).state();
   const b = Game.withSeed(7, 100n).state();
   expect(a).toEqual(b);
-  expect(a.phase).toBe("Opening");
-  expect(a.round).toBe(0);
+  expect(a.phase).toBe("Day");
+  expect(a.round).toBe(1);
   expect(a.players.every((p) => p.alive)).toBe(true);
   expect(a.majorityRequired).toBe(4);
   expect(a.majorityTarget).toBeUndefined();
-  expect(a.pendingActors).toEqual([2]);
+  expect(a.pendingActors).toEqual([0, 1, 2, 3, 4, 5, 6]);
+  expect(a.pendingInspectors).toEqual([2]);
   expect(a.players.filter((p) => p.role === "Werewolf").map((p) => p.id)).toEqual([0, 6]);
 });
 
@@ -45,7 +43,6 @@ test("timeSeed returns a u64-range bigint", () => {
 
 test("Day 1 accepts votes and can end in a villager win before night", () => {
   const game = Game.withRoles(["Werewolf", "Villager", "Villager", "Villager", "Villager"]);
-  game.resolveOpening();
   expect(game.state().phase).toBe("Day");
   const before = game.state();
   expect(grab(() => game.nightAction(0, 1)).code).toBe("WrongPhase");
@@ -95,7 +92,6 @@ test("majority crosses the binding and votes clear after resolution", () => {
     "Villager",
     "Villager",
   ]);
-  game.resolveOpening();
   expect(game.state().majorityRequired).toBe(4);
   for (const voter of [0, 1, 2]) game.vote(voter, 6);
   const before = game.state();
@@ -132,7 +128,6 @@ test.each([
     "Villager",
     "Villager",
   ]);
-  game.resolveOpening();
   for (let voter = 0; voter < targets.length - 1; voter++) game.vote(voter, targets[voter]!);
   const before = game.state();
   expect(grab(() => game.resolveDay()).code).toBe("NoMajority");
@@ -162,7 +157,6 @@ test("a day command during Night throws WrongPhase", () => {
 
 test("votes can be changed and repeated without counting twice", () => {
   const game = Game.withRoles(["Werewolf", "Villager", "Villager", "Villager", "Villager"]);
-  game.resolveOpening();
   game.vote(2, 0);
   game.vote(2, 0);
   game.vote(2, 3);
@@ -292,53 +286,49 @@ test("Hunter actions and validation cross the binding, including seat zero", () 
   expect(grab(() => game.hunterAction(0, 2)).code).toBe("GameOver");
 });
 
-test("the opening allows only one Seer inspection before Day 1", () => {
+test("the Seer may inspect once on Day 1 alongside the vote", () => {
   const game = Game.withRoles(["Seer", "Werewolf", "Doctor", "Villager", "Villager"]);
   const before = game.state();
-  expect(before.phase).toBe("Opening");
-  expect(before.round).toBe(0);
-  expect(before.pendingActors).toEqual([0]);
-  for (const call of [
-    () => game.vote(3, 1),
-    () => game.nightAction(1, 3),
-    () => game.doctorAction(2, 3),
-    () => game.resolveDay(),
-    () => game.resolveNight(),
-  ])
+  expect(before).toMatchObject({
+    phase: "Day",
+    round: 1,
+    pendingActors: [0, 1, 2, 3, 4],
+    pendingInspectors: [0],
+  });
+  for (const call of [() => game.nightAction(1, 3), () => game.doctorAction(2, 3), () => game.resolveNight()])
     expect(grab(call).code).toBe("WrongPhase");
   expect(grab(() => game.seerAction(1, 3)).code).toBe("NotASeer");
   expect(grab(() => game.seerAction(0, 99)).code).toBe("UnknownPlayer");
   expect(game.state()).toEqual(before);
+  game.vote(3, 1);
   const result = game.seerAction(0, 1);
-  expect(result).toEqual({ seer: 0, target: 1, round: 0, isWerewolf: true });
-  expect(game.state()).toMatchObject({ phase: "Opening", round: 0, pendingActors: [] });
-  expect(grab(() => game.seerAction(0, 2)).code).toBe("AlreadyActed");
-  expect(grab(() => game.vote(3, 1)).code).toBe("WrongPhase");
-  game.resolveOpening();
+  expect(result).toEqual({ seer: 0, target: 1, round: 1, phase: "Day", isWerewolf: true });
   expect(game.state()).toMatchObject({
     phase: "Day",
     round: 1,
-    pendingActors: [0, 1, 2, 3, 4],
+    pendingActors: [0, 1, 2, 4],
+    pendingInspectors: [],
     inspections: [result],
-    votes: [],
-    nightPicks: [],
-    doctorPicks: [],
+    votes: [{ voter: 3, target: 1 }],
   });
+  expect(grab(() => game.seerAction(0, 2)).code).toBe("AlreadyActed");
   expect(game.state().players.every((p) => p.alive)).toBe(true);
-  expect(grab(() => game.seerAction(0, 2)).code).toBe("WrongPhase");
 });
 
-test("openings can end without a Seer or with a skipped inspection", () => {
+test("an unused Day 1 inspection is skipped and later days allow none", () => {
   for (const role of ["Villager", "Seer"] as const) {
-    const game = Game.withRoles([role, "Werewolf", "Doctor", "Villager", "Villager"]);
-    expect(game.state()).toMatchObject({ phase: "Opening", round: 0, inspections: [] });
-    game.resolveOpening();
-    expect(game.state()).toMatchObject({ phase: "Day", round: 1, inspections: [] });
-    expect(game.state().players.every((p) => p.alive)).toBe(true);
-    expect(grab(() => game.resolveOpening()).code).toBe("WrongPhase");
+    const game = Game.withRoles([role, "Werewolf", "Doctor", "Villager", "Villager", "Villager"]);
+    expect(game.state().pendingInspectors).toEqual(role === "Seer" ? [0] : []);
+    const players = game.state().players;
+    for (const player of players) game.vote(player.id, 5);
+    game.resolveDay();
+    expect(game.state()).toMatchObject({ phase: "Night", round: 1, inspections: [] });
+    if (role === "Seer") expect(game.seerAction(0, 1)).toMatchObject({ round: 1, phase: "Night" });
+    game.doctorAction(2, 3);
+    game.nightAction(1, 4);
+    game.resolveNight();
+    expect(game.state()).toMatchObject({ phase: "Day", round: 2, pendingInspectors: [] });
     expect(grab(() => game.seerAction(0, 1)).code).toBe("WrongPhase");
-    reachNight(game);
-    if (role === "Seer") expect(game.seerAction(0, 1).round).toBe(1);
   }
 });
 
@@ -356,8 +346,11 @@ test("special roles cross the binding with final actions, private results, and a
   expect(game.state().doctorPicks).toEqual([{ voter: 0, target: 0 }]);
   expect(grab(() => game.resolveNight()).code).toBe("ActionsIncomplete");
   const result = game.seerAction(2, 1);
-  expect(result).toEqual({ seer: 2, target: 1, round: 1, isWerewolf: true });
-  expect(game.state().inspections).toEqual([{ seer: 2, target: 0, round: 0, isWerewolf: false }, result]);
+  expect(result).toEqual({ seer: 2, target: 1, round: 1, phase: "Night", isWerewolf: true });
+  expect(game.state().inspections).toEqual([
+    { seer: 2, target: 0, round: 1, phase: "Day", isWerewolf: false },
+    result,
+  ]);
   expect(grab(() => game.seerAction(2, 3)).code).toBe("AlreadyActed");
   expect(grab(() => game.doctorAction(0, 3)).code).toBe("AlreadyActed");
   expect(game.resolveNight()).toEqual({ kind: "Saved", saved: 0 });

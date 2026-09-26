@@ -31,13 +31,11 @@ export type SlackInput = {
 } & ({ kind: "mention" | "dm"; text: string } | { kind: "choice"; value: string });
 
 const HELP =
-  "In the game channel: `@werewolf join`, `leave`, `start`, `end`, `status`, `stats`, `vote @player`, or `help`. The first player is host; only the host starts or ends games. Use `@werewolf end` to cancel the game and open a fresh lobby. During the day, vote publicly with `@werewolf vote @player`. A strict majority (more than half of living players) eliminates a player early. Otherwise, once all living players vote, the unique leader (plurality) is eliminated; a tie for the most votes eliminates nobody. Night then begins. Repeat the command to change your vote before a majority is reached or everyone has voted. Every game starts with a random 60–120 second opening before Day 1, with no attacks, protection, or voting. A Seer may privately inspect one player before the deadline; missed inspections are skipped. The opening never ends early. Use DM dropdowns for opening and night actions and the Hunter's final shot. DM `status` to get your role, inspection history, and current prompt again. DM `stats` for your lifetime wins, losses, and team breakdowns; use `@werewolf stats` in the channel for team win rates and the top 3 most frequent wolves. Stats count completed games in this channel, excluding dev games and bots.";
+  "In the game channel: `@werewolf join`, `leave`, `start`, `end`, `status`, `stats`, `vote @player`, or `help`. The first player is host; only the host starts or ends games. Use `@werewolf end` to cancel the game and open a fresh lobby. During the day, vote publicly with `@werewolf vote @player`. A strict majority (more than half of living players) eliminates a player early. Otherwise, once all living players vote, the unique leader (plurality) is eliminated; a tie for the most votes eliminates nobody. Night then begins. Repeat the command to change your vote before a majority is reached or everyone has voted. Every game starts on Day 1. A Seer may privately inspect one player during Day 1 using DM dropdowns; if Day 1 ends first, that inspection is skipped. Use DM dropdowns for the Seer's Day 1 inspection, night actions, and the Hunter's final shot. DM `status` to get your role, inspection history, and current prompt again. DM `stats` for your lifetime wins, losses, and team breakdowns; use `@werewolf stats` in the channel for team win rates and the top 3 most frequent wolves. Stats count completed games in this channel, excluding dev games and bots.";
 
 export class SlackGame {
   private readonly seen = new Set<string>();
   private prompt = "";
-  private openingDeadline: number | null = null;
-  private readonly now: () => number;
   private messages: SlackMessage[] = [];
   private readonly bots = new Set<string>();
   private readonly rng: Rng;
@@ -51,13 +49,11 @@ export class SlackGame {
     private readonly options: {
       dev?: boolean;
       seed?: bigint;
-      now?: () => number;
       recordResult?: (result: FinishedGame) => void;
       playerStats?: (user: string) => PlayerStats;
       channelStats?: () => ChannelStats;
     } = {},
   ) {
-    this.now = options.now ?? Date.now;
     this.dev = options.dev ?? false;
     this.rng = new Rng(options.seed ?? timeSeed());
   }
@@ -69,21 +65,6 @@ export class SlackGame {
     }
   }
 
-  tick(): SlackMessage[] {
-    this.messages = [];
-    this.expireOpening();
-    return this.messages;
-  }
-
-  private expireOpening(): void {
-    if (this.openingDeadline === null || this.now() < this.openingDeadline) return;
-    this.lobby.game!.resolveOpening();
-    this.openingDeadline = null;
-    this.prompt = crypto.randomUUID();
-    this.announcePhase();
-    this.advance();
-  }
-
   handle(input: SlackInput): SlackMessage[] {
     this.messages = [];
     if (input.kind === "mention" ? input.channel !== this.channel : !input.channel.startsWith("D")) return [];
@@ -92,7 +73,6 @@ export class SlackGame {
     if (this.seen.size > 10_000) this.seen.delete(this.seen.values().next().value!);
 
     try {
-      this.expireOpening();
       if (input.kind === "choice") this.choose(input.user, input.value);
       else if (input.kind === "dm") {
         if (input.text.trim().toLowerCase() === "stats") {
@@ -143,7 +123,6 @@ export class SlackGame {
           }
         }
         const { aliveVillagers, aliveWolves } = this.lobby.start(user).state();
-        this.openingDeadline = this.now() + 60_000 + this.rng.below(60_001);
         this.currentGame = { id: crypto.randomUUID(), startedAt: new Date() };
         this.prompt = crypto.randomUUID();
         this.publish(
@@ -222,11 +201,11 @@ export class SlackGame {
       this.advance();
       return;
     }
-    if (state.phase === "Opening") {
+    if (state.phase === "Day") {
       const result = game.seerAction(seat, target);
       this.dm(
         user,
-        `Your opening inspection: ${this.mention(result.target)} is ${result.isWerewolf ? "a Werewolf" : "innocent"}.`,
+        `Your Day ${result.round} inspection: ${this.mention(result.target)} is ${result.isWerewolf ? "a Werewolf" : "innocent"}.`,
       );
       return;
     }
@@ -262,13 +241,10 @@ export class SlackGame {
         humanVote = null;
         continue;
       }
-      if (state.phase === "Opening") {
-        const seer = state.pendingActors[0];
+      if (state.phase === "Day") {
+        const seer = state.pendingInspectors[0];
         if (seer !== undefined && this.isBot(seer))
           game.seerAction(seer, randomLivingOther(state, this.rng, seer));
-        return;
-      }
-      if (state.phase === "Day") {
         if (state.majorityTarget == null && state.pendingActors.length > 0) {
           const humansAlive = state.players.some((p) => p.alive && !this.isBot(p.id));
           if (humansAlive && humanVote === null) return;
@@ -377,11 +353,6 @@ export class SlackGame {
     if (state.phase === "Hunter") {
       this.publish("The Hunter has a final shot. Play pauses until they choose a target in their DMs.");
       this.promptActors();
-    } else if (state.phase === "Opening") {
-      this.publish(
-        "Opening before Day 1. Roles are assigned and the village is settling in. Everyone waits for a random 60–120 second timer; no attacks, protection, or voting. Day 1 starts automatically.",
-      );
-      this.promptActors();
     } else if (state.phase === "Night") {
       this.publish(`Night ${state.round}. The village sleeps. Players with night actions, check your DMs.`);
       this.promptActors();
@@ -389,6 +360,7 @@ export class SlackGame {
       this.publish(
         `Day ${state.round}. Discuss in <#${this.channel}> and vote with \`@werewolf vote @player\`. A strict majority of ${state.majorityRequired} votes eliminates a player early. Otherwise, once all living players vote, the unique leader (plurality) is eliminated; a tie for the most votes eliminates nobody. Night then begins. You can change your vote until a majority is reached or everyone has voted.${this.dev ? " To target a dev bot, use its player number: @werewolf vote 3." : ""}\n${this.livingRoster()}`,
       );
+      this.promptActors();
     }
   }
 
@@ -396,19 +368,21 @@ export class SlackGame {
     for (const { user } of [...this.lobby.members]) this.lobby.leave(user);
     this.bots.clear();
     this.currentGame = null;
-    this.openingDeadline = null;
     this.prompt = "";
   }
 
   private promptActors(): void {
-    for (const seat of this.lobby.game!.state().pendingActors) this.sendPrompt(this.user(seat));
+    const state = this.lobby.game!.state();
+    const actors = state.phase === "Day" ? state.pendingInspectors : state.pendingActors;
+    for (const seat of actors) this.sendPrompt(this.user(seat));
   }
 
   private sendPrompt(user: string): void {
     if (this.bots.has(user)) return;
     const state = this.lobby.game!.state();
     const seat = this.lobby.seatOf(user)!;
-    if (!["Opening", "Night", "Hunter"].includes(state.phase) || !state.pendingActors.includes(seat)) return;
+    const actors = state.phase === "Day" ? state.pendingInspectors : state.pendingActors;
+    if (!["Day", "Night", "Hunter"].includes(state.phase) || !actors.includes(seat)) return;
     const role = this.lobby.game!.roleOf(seat);
     const excludeSelf = role === "Werewolf" && livingWolves(state).length === 1;
     const instruction =
@@ -422,7 +396,7 @@ export class SlackGame {
     this.messages.push({
       destination: "dm",
       user,
-      text: `${state.phase === "Opening" ? "Opening before Day 1" : `${state.phase} ${state.round}`}: ${instruction}.${state.phase === "Opening" ? ` Submit before ${new Date(this.openingDeadline!).toISOString()}; a missed inspection is skipped. Day 1 starts when the timer expires, not when you act.` : ""}\n${this.livingRoster()}`,
+      text: `${state.phase} ${state.round}: ${instruction}.${state.phase === "Day" ? " This is your only daytime inspection; if Day 1 ends before you choose, it is skipped. It does not use your Night 1 inspection." : ""}\n${this.livingRoster()}`,
       choices: state.players
         .filter((p) => p.alive && (!excludeSelf || p.id !== seat))
         .map((p) => ({
@@ -447,7 +421,7 @@ export class SlackGame {
         : role === "Doctor"
           ? " Each night, protect one player, including yourself, from the werewolves. You win with the village."
           : role === "Seer"
-            ? " Before Day 1, inspect one living player privately during the timed opening. Submit before the prompt's deadline; a missed inspection is skipped and the timer never ends early. Each night, inspect one player to learn privately whether they are a werewolf or innocent. You win with the village."
+            ? " During Day 1 only, you may inspect one living player privately; if Day 1 ends before you choose, that inspection is skipped. Each night, inspect one player to learn privately whether they are a werewolf or innocent. You win with the village."
             : role === "Hunter"
               ? " If eliminated, choose one living player to take down with your final shot. You win with the village."
               : " Find the werewolves through discussion and voting.";
@@ -467,19 +441,15 @@ export class SlackGame {
     for (const result of this.lobby.game.state().inspections.filter((result) => result.seer === seat)) {
       this.dm(
         user,
-        `${result.round === 0 ? "Opening" : `Night ${result.round}`} inspection: ${this.mention(result.target)} is ${result.isWerewolf ? "a Werewolf" : "innocent"}.`,
+        `${result.phase} ${result.round} inspection: ${this.mention(result.target)} is ${result.isWerewolf ? "a Werewolf" : "innocent"}.`,
       );
     }
     this.dm(user, this.status());
     const state = this.lobby.game.state();
-    if (state.phase === "Opening") {
+    if (state.phase === "Day" && state.pendingInspectors.includes(seat)) {
       this.dm(
         user,
-        state.pendingActors.includes(seat)
-          ? "Your opening inspection is still needed. Choose before the deadline below or it will be skipped."
-          : state.inspections.some((result) => result.seer === seat && result.round === 0)
-            ? "Your opening inspection is recorded. Waiting for the timer before Day 1."
-            : "You have no opening action. Waiting for the timer before Day 1.",
+        "Your Day 1 inspection is available. Choose below before Day 1 ends or it will be skipped.",
       );
     }
     if (state.phase === "Night") {
@@ -506,12 +476,7 @@ export class SlackGame {
       state.phase === "Night"
         ? "\nNight ends automatically once all living players with night actions have submitted their choices. DM `status` to check your own action or get your dropdown again."
         : "";
-    const phase = state.phase === "Opening" ? "Opening before Day 1" : `${state.phase} ${state.round}`;
-    const opening =
-      state.phase === "Opening"
-        ? "\nWaiting for the random 60–120 second opening timer. No attacks, protection, or voting. Day 1 starts automatically."
-        : "";
-    return `${phase}.\n${this.livingRoster()}${night}${opening}`;
+    return `${state.phase} ${state.round}.\n${this.livingRoster()}${night}`;
   }
 
   private voteLeaderboard(): string {
