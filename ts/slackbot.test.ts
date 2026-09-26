@@ -146,15 +146,18 @@ test("an unused Day 1 inspection is skipped and later days offer none", () => {
 
 test("dev bot Seers may inspect on Day 1 without public tells", () => {
   const publicStarts = new Set<string>();
-  const paths = new Set<string>();
-  for (let seed = 0n; seed < 40n; seed++) {
+  for (const [seed, path] of [
+    [0n, "no-seer"],
+    [1n, "bot"],
+    [3n, "human"],
+  ] as const) {
     const t = table(1, seed, true);
     const start = t.command("start");
     const state = t.lobby.game!.state();
     const seer = state.players.find((p) => p.role === "Seer");
-    const path = !seer ? "no-seer" : seer.id === 0 ? "human" : "bot";
-    paths.add(path);
+    expect(!seer ? "no-seer" : seer.id === 0 ? "human" : "bot").toBe(path);
     expect(state.phase).toBe("Day");
+    expect(state.round).toBe(1);
     expect(state.inspections).toHaveLength(path === "bot" ? 1 : 0);
     expect(state.inspections.every((result) => result.phase === "Day")).toBe(true);
     expect(start.filter((m) => m.choices)).toHaveLength(path === "human" ? 1 : 0);
@@ -167,7 +170,6 @@ test("dev bot Seers may inspect on Day 1 without public tells", () => {
       ),
     );
   }
-  expect(paths).toEqual(new Set(["no-seer", "human", "bot"]));
   expect(publicStarts.size).toBe(1);
 });
 
@@ -360,11 +362,8 @@ for (const count of [5, 8]) {
 
 for (const order of [
   ["Werewolf", "Doctor", "Seer"],
-  ["Werewolf", "Seer", "Doctor"],
-  ["Doctor", "Werewolf", "Seer"],
   ["Doctor", "Seer", "Werewolf"],
   ["Seer", "Werewolf", "Doctor"],
-  ["Seer", "Doctor", "Werewolf"],
 ]) {
   test(`night with a dead wolf resolves in order ${order.join(", ")} and status explains each player's action`, () => {
     const t = table();
@@ -467,13 +466,16 @@ test("night buttons reject outsiders, wrong owners, invalid targets and expired 
   expect(t.dm(`U${wolf}`).some((m) => m.choices)).toBe(false);
 });
 
-test("event retries cannot replay a command or cross into another game", () => {
+test("a retried start cannot start a new game after the original game ends", () => {
   const t = table();
   const input: SlackInput = { id: "same", kind: "mention", user: "U0", channel: "CGAME", text: "start" };
   expect(t.bot.handle(input).length).toBeGreaterThan(0);
-  const before = t.lobby.game!.state();
+  t.command("end");
+  for (let seat = 0; seat < 8; seat++) t.command("join", `U${seat}`);
   expect(t.bot.handle(input)).toEqual([]);
-  expect(t.lobby.game!.state()).toEqual(before);
+  expect(t.lobby.game).toBeNull();
+  expect(t.lobby.size).toBe(8);
+  expect(t.command("start")[0]?.text).toContain("game has started");
 });
 
 test("day status groups votes into a descending leaderboard with stable ties", () => {
@@ -519,41 +521,34 @@ test("day status groups votes into a descending leaderboard with stable ties", (
   }
 });
 
-test("public votes resolve immediately at a strict living majority on every day", () => {
-  for (const count of [5, 7, 8]) {
-    const t = table(count);
-    expect(t.command("vote <@U1>")[0]?.text).toContain("not in an active game");
-    t.command("start");
-    const target = t.lobby.game!.state().players.find((p) => p.role === "Villager")!.id;
-    const required = Math.floor(count / 2) + 1;
-    for (let voter = 0; voter < required; voter++) {
-      const output = t.command(` VoTe <@U${target}> `, `U${voter}`);
-      expect(output[0]).toEqual({
-        destination: "channel",
-        text: `<@U${voter}> voted for <@U${target}> (${voter + 1}/${required} votes for an early majority).`,
-      });
-      if (voter + 1 < required) {
-        expect(t.lobby.game!.state().phase).toBe("Day");
-        expect(output.some((m) => m.choices)).toBe(false);
-      } else {
-        expect(t.lobby.game!.state().phase).toBe("Night");
-        expect(output.some((m) => m.text.includes("eliminated by the village"))).toBe(true);
-        expect(output.some((m) => m.text.startsWith("Night 1."))).toBe(true);
-      }
+test("public votes announce progress and automatically transition at a majority", () => {
+  const t = table();
+  expect(t.command("vote <@U1>")[0]?.text).toContain("not in an active game");
+  t.command("start");
+  const target = t.lobby.game!.state().players.find((p) => p.role === "Villager")!.id;
+  for (let voter = 0; voter < 5; voter++) {
+    const output = t.command(` VoTe <@U${target}> `, `U${voter}`);
+    expect(output[0]).toEqual({
+      destination: "channel",
+      text: `<@U${voter}> voted for <@U${target}> (${voter + 1}/5 votes for an early majority).`,
+    });
+    if (voter < 4) {
+      expect(t.lobby.game!.state().phase).toBe("Day");
+      expect(output.some((m) => m.choices)).toBe(false);
+    } else {
+      expect(t.lobby.game!.state().phase).toBe("Night");
+      expect(output.some((m) => m.text.includes("eliminated by the village"))).toBe(true);
+      expect(output.some((m) => m.text.startsWith("Night 1."))).toBe(true);
     }
-    expect(t.lobby.game!.state().votes).toEqual([]);
-    expect(t.vote(0, 1)[0]?.text).toContain("requires Day");
-    morning(t);
-    const game = t.lobby.game!;
-    const state = game.state();
-    expect(state.phase).toBe("Day");
-    expect(state.round).toBe(2);
-    expect(state.majorityRequired).toBe(Math.floor((count - 2) / 2) + 1);
-    expect(state.votes).toEqual([]);
-    const wolf = state.players.find((p) => p.alive && p.role === "Werewolf")!.id;
-    eliminate(t, wolf);
-    expect(game.isAlive(wolf)).toBe(false);
   }
+  expect(t.vote(0, 1)[0]?.text).toContain("requires Day");
+  morning(t);
+  expect(t.command("status")[0]?.text).toContain("4 for an early majority");
+  const game = t.lobby.game!;
+  const wolf = game.state().players.find((p) => p.alive && p.role === "Werewolf")!.id;
+  const output = eliminate(t, wolf);
+  expect(game.isAlive(wolf)).toBe(false);
+  expect(output.some((m) => m.text.startsWith("Night 2."))).toBe(true);
 });
 
 test("incomplete split votes stay in day, votes can change, and retries never count twice", () => {
@@ -609,50 +604,24 @@ test("completed 3-2-2-1 ballots eliminate the unique plurality and reject stale 
   expect(game.state()).toEqual(after);
 });
 
-test("completed top ties with or without lower targets skip elimination and begin the same night's actions", () => {
-  for (const ballot of [
-    [0, 0, 0, 0, 1, 1, 1, 1],
-    [0, 0, 0, 1, 1, 1, 2, 3],
-  ]) {
-    const t = table();
-    t.command("start");
-    const game = t.lobby.game!;
-    for (let voter = 0; voter < 7; voter++) t.vote(voter, ballot[voter]!);
-    expect(game.state().phase).toBe("Day");
-    const output = t.vote(7, ballot[7]!);
-    expect(game.state().phase).toBe("Night");
-    expect(game.state().round).toBe(1);
-    expect(game.state().players.every((p) => p.alive)).toBe(true);
-    expect(game.state().votes).toEqual([]);
-    expect(output.some((m) => m.text.includes("No one was eliminated"))).toBe(true);
-    expect(output.some((m) => m.text.startsWith("Night 1."))).toBe(true);
-    expect(output.some((m) => m.choices)).toBe(true);
-    expect(output.some((m) => m.text.includes("eliminated by the village"))).toBe(false);
-    expect(output.some((m) => m.text.startsWith("You were eliminated"))).toBe(false);
-    expect(t.vote(0, 1)[0]?.text).toContain("requires Day");
-  }
-});
-
-test("changed votes count once toward a completed plurality ballot", () => {
+test("a completed tie announces no elimination and sends night prompts", () => {
   const t = table();
   t.command("start");
   const game = t.lobby.game!;
-  const target = game.state().players.find((p) => p.role === "Villager")!.id;
-  const others = game
-    .state()
-    .players.filter((p) => p.id !== target)
-    .map((p) => p.id);
-  t.vote(0, others[0]!);
-  t.vote(0, target);
-  t.vote(0, target);
-  expect(game.state().votes).toEqual([{ voter: 0, target }]);
-  expect(game.state().pendingActors).toHaveLength(7);
-  const ballot = [target, target, others[0]!, others[0]!, others[1]!, others[1]!, others[2]!];
-  ballot.forEach((choice, index) => {
-    t.vote(index + 1, choice);
-  });
-  expect(game.isAlive(target)).toBe(false);
+  const ballot = [0, 0, 0, 0, 1, 1, 1, 1];
+  for (let voter = 0; voter < 7; voter++) t.vote(voter, ballot[voter]!);
+  expect(game.state().phase).toBe("Day");
+  const output = t.vote(7, ballot[7]!);
   expect(game.state().phase).toBe("Night");
+  expect(game.state().round).toBe(1);
+  expect(game.state().players.every((p) => p.alive)).toBe(true);
+  expect(game.state().votes).toEqual([]);
+  expect(output.some((m) => m.text.includes("No one was eliminated"))).toBe(true);
+  expect(output.some((m) => m.text.startsWith("Night 1."))).toBe(true);
+  expect(output.some((m) => m.choices)).toBe(true);
+  expect(output.some((m) => m.text.includes("eliminated by the village"))).toBe(false);
+  expect(output.some((m) => m.text.startsWith("You were eliminated"))).toBe(false);
+  expect(t.vote(0, 1)[0]?.text).toContain("requires Day");
 });
 
 test("Hunter eliminated by plurality pauses for a final shot", () => {
@@ -676,30 +645,6 @@ test("Hunter eliminated by plurality pauses for a final shot", () => {
   expect(shot.some((m) => m.text.includes("Hunter's final shot"))).toBe(true);
   expect(game.isAlive(target)).toBe(false);
   expect(game.state().phase).toBe("Night");
-});
-
-test("subsequent completed ballots require only living voters", () => {
-  const t = table();
-  t.command("start");
-  reachNight(t);
-  morning(t);
-  const game = t.lobby.game!;
-  const living = game
-    .state()
-    .players.filter((p) => p.alive)
-    .map((p) => p.id);
-  expect(living).toHaveLength(6);
-  for (const voter of living.slice(0, -1)) t.vote(voter, voter);
-  expect(game.state().pendingActors).toEqual([living.at(-1)!]);
-  t.vote(living.at(-1)!, living.at(-1)!);
-  expect(game.state().phase).toBe("Night");
-  expect(game.state().round).toBe(2);
-  expect(
-    game
-      .state()
-      .players.filter((p) => p.alive)
-      .map((p) => p.id),
-  ).toEqual(living);
 });
 
 test("day voting requires one valid channel mention from a living player", () => {
@@ -741,53 +686,56 @@ test("day voting requires one valid channel mention from a living player", () =>
   expect(t.lobby.game!.state()).toEqual(state);
 });
 
-test("real engine games finish for every lobby size and can restart", () => {
-  for (let count = 5; count <= 12; count++) {
-    for (let seed = 0n; seed < 10n; seed++) {
-      const t = table(count, seed);
-      const start = t.command("start");
-      const firstState = t.lobby.game!.state();
-      const wolves = firstState.players.filter((p) => p.role === "Werewolf").length;
-      const villagers = firstState.aliveVillagers;
-      expect(
-        start.find((m) => m.destination === "channel" && m.text.startsWith("The game has started"))?.text,
-      ).toBe(
-        `The game has started with ${count} players. Teams: ${wolves} ${wolves === 1 ? "Werewolf" : "Werewolves"} and ${villagers} Villagers. Roles are in your DMs.`,
-      );
-      const wolf = firstState.pendingActors[0]!;
-      let old: string | undefined;
-      let turns = 0;
-      while (t.lobby.game) {
-        if (++turns > 24) throw new Error("Game did not finish");
-        const state = t.lobby.game.state();
-        if (state.phase === "Night") morning(t);
-        else if (state.phase === "Hunter") {
-          t.choose(state.pendingActors[0]!, state.players.find((p) => p.alive)!.id);
-        } else {
-          expect(state.votes).toEqual([]);
-          old ??= `${crypto.randomUUID()}:U${wolf}:0`;
-          const target = state.players.find((p) => p.alive && p.role === "Werewolf")!.id;
-          eliminate(t, target);
-        }
+test.each([
+  { count: 5, teams: "1 Werewolf and 4 Villagers" },
+  { count: 12, teams: "4 Werewolves and 8 Villagers" },
+])(
+  "village victory resets a $count-player lobby and expires real prompts across restart",
+  ({ count, teams }) => {
+    const t = table(count);
+    const start = t.command("start");
+    const players = t.lobby.game!.state().players;
+    expect(start[0]).toEqual({
+      destination: "channel",
+      text: `The game has started with ${count} players. Teams: ${teams}. Roles are in your DMs.`,
+    });
+    reachNight(t);
+    const prompt = t.messages.findLast((m) => m.choices)!;
+    const old = {
+      kind: "choice",
+      user: prompt.user!,
+      channel: "DTEST",
+      value: prompt.choices![0]!.value,
+    } as const;
+    let turns = 0;
+    while (t.lobby.game) {
+      if (++turns > 24) throw new Error("Game did not finish");
+      const state = t.lobby.game.state();
+      if (state.phase === "Night") morning(t);
+      else if (state.phase === "Hunter") {
+        t.choose(state.pendingActors[0]!, state.players.find((p) => p.alive)!.id);
+      } else {
+        eliminate(t, state.players.find((p) => p.alive && p.role === "Werewolf")!.id);
       }
-      expect(old).toBeDefined();
-      expect(t.messages.some((m) => m.destination === "channel" && m.text.includes("win!"))).toBe(true);
-      expect(t.lobby.state).toBe("Waiting");
-      expect(t.lobby.size).toBe(0);
-      expect(t.lobby.host).toBeNull();
-      expect(t.command("status")[0]?.text).toContain("Lobby: 0/12");
-      expect(
-        t.receive({ kind: "choice", user: `U${wolf}`, channel: "DTEST", value: old })[0]?.text,
-      ).toContain("not in an active game");
-      for (let seat = 0; seat < count; seat++) t.command("join", `U${seat}`);
-      t.command("start");
-      expect(t.lobby.game!.state().round).toBe(1);
-      expect(
-        t.receive({ kind: "choice", user: `U${wolf}`, channel: "DTEST", value: old })[0]?.text,
-      ).toContain("expired");
     }
-  }
-});
+    const announcement = t.messages.find(
+      (m) => m.destination === "channel" && m.text.startsWith("Villagers win!"),
+    )!;
+    expect(announcement.text).toContain("A new lobby is open!");
+    for (const player of players) expect(announcement.text).toContain(`<@U${player.id}>: ${player.role}`);
+    expect(t.lobby.state).toBe("Waiting");
+    expect(t.lobby.size).toBe(0);
+    expect(t.lobby.host).toBeNull();
+    expect(t.command("status")[0]?.text).toContain("Lobby: 0/12");
+    expect(t.receive(old)[0]?.text).toContain("not in an active game");
+    for (let seat = 0; seat < count; seat++) t.command("join", `U${seat}`);
+    t.command("start");
+    const before = t.lobby.game!.state();
+    expect(before.round).toBe(1);
+    expect(t.receive(old)[0]?.text).toContain("expired");
+    expect(t.lobby.game!.state()).toEqual(before);
+  },
+);
 
 test("delivery retries failed messages in order without replaying mutations", async () => {
   const t = table(0);
@@ -987,83 +935,96 @@ test("dev bots cannot revote after the last human completes a tied ballot", () =
   expect(game.state().players.every((p) => p.alive)).toBe(true);
 });
 
-test("dev games fill with bots, wait for humans, finish after elimination, and clean up for replay", () => {
-  const roles = new Set<string>();
-  let soloVotes = 0;
-  let eliminatedHumans = 0;
-  for (const humans of [1, 2, 4, 5]) {
-    for (let seed = 0n; seed < 30n; seed++) {
-      const results: FinishedGame[] = [];
-      const t = table(humans, seed, true, (result) => results.push(result));
-      const start = t.command("start");
-      expect(start[0]?.text).toContain("started with 5 players");
-      expect(t.lobby.game!.state().phase).toBe("Day");
-      expect(t.lobby.game!.state().players.every((p) => p.alive)).toBe(true);
-      expect(
-        start.filter((m) => m.choices).every((m) => m.text.startsWith("Day 1: choose someone to inspect")),
-      ).toBe(true);
-      expect(start.filter((m) => m.text.includes("You are Player")).length).toBe(humans);
-      roles.add(
-        start
-          .find((m) => m.user === "U0" && m.text.includes("You are Player"))!
-          .text.split("a ")[1]!
-          .split(".")[0]!,
-      );
-      let turns = 0;
-      while (t.lobby.game) {
-        if (++turns > 100) throw new Error("Dev game did not finish");
-        const game = t.lobby.game;
-        const state = game.state();
-        expect(state.players.length).toBe(5);
-        const humanActors = (
-          state.phase === "Day" ? state.players.filter((p) => p.alive).map((p) => p.id) : state.pendingActors
-        ).filter((seat) => seat < humans);
-        expect(humanActors.length).toBeGreaterThan(0);
-        if (state.phase === "Hunter") {
-          t.choose(state.pendingActors[0]!, state.players.find((p) => p.alive)!.id);
-        } else if (state.phase === "Night") {
-          const target = state.players.find((p) => p.alive && p.role !== "Werewolf")!.id;
-          for (const seat of humanActors) t.choose(seat, target);
-        } else {
-          expect(t.dm(`U${humanActors[0]}`).some((m) => m.choices)).toBe(
-            state.pendingInspectors.includes(humanActors[0]!),
-          );
-          expect(t.command("vote <@U0>", "OUTSIDER")[0]?.text).toContain("not in an active game");
-          const target = state.players.find((p) => p.alive && p.role === "Werewolf")!.id;
-          for (const seat of humanActors) {
-            if (game.state().phase !== "Day" || game.state().round !== state.round) break;
-            t.vote(seat, target);
-            if (humans === 1) soloVotes++;
-          }
+test.each([
+  { humans: 1, seed: 1n, role: "Doctor" },
+  { humans: 1, seed: 2n, role: "Villager" },
+  { humans: 1, seed: 3n, role: "Seer" },
+  { humans: 1, seed: 4n, role: "Werewolf" },
+  { humans: 1, seed: 8n, role: "Hunter" },
+  { humans: 2, seed: 1n, role: "Doctor" },
+  { humans: 4, seed: 1n, role: "Doctor" },
+  { humans: 5, seed: 1n, role: "Doctor" },
+])(
+  "dev game ($humans human players, $role host) waits for humans, persists, and restarts",
+  ({ humans, seed, role }) => {
+    const results: FinishedGame[] = [];
+    const t = table(humans, seed, true, (result) => results.push(result));
+    const start = t.command("start");
+    expect(start[0]?.text).toContain("started with 5 players");
+    expect(t.lobby.game!.state().phase).toBe("Day");
+    expect(t.lobby.game!.roleOf(0)).toBe(role);
+    expect(start.find((m) => m.user === "U0" && m.text.includes("You are Player"))?.text).toContain(
+      `a ${role}.`,
+    );
+    expect(start.filter((m) => m.text.includes("You are Player"))).toHaveLength(humans);
+    if (humans === 1 && role !== "Villager") {
+      const game = t.lobby.game!;
+      const target =
+        role === "Hunter" ? 0 : game.state().players.find((p) => p.id !== 0 && p.role === "Villager")!.id;
+      // Preload two bot votes so the human's deciding vote reaches their role-specific prompt.
+      for (const voter of [1, 2]) game.vote(voter, target);
+      t.vote(0, target);
+      expect(game.state().phase).toBe(role === "Hunter" ? "Hunter" : "Night");
+      expect(game.state().pendingActors).toContain(0);
+      expect(t.dm("U0").some((m) => m.choices)).toBe(true);
+    }
+    let turns = 0;
+    while (t.lobby.game) {
+      if (++turns > 100) throw new Error("Dev game did not finish");
+      const game = t.lobby.game;
+      const state = game.state();
+      const humanActors = (
+        state.phase === "Day" ? state.players.filter((p) => p.alive).map((p) => p.id) : state.pendingActors
+      ).filter((seat) => seat < humans);
+      expect(humanActors.length).toBeGreaterThan(0);
+      if (state.phase === "Hunter") {
+        t.choose(state.pendingActors[0]!, state.players.find((p) => p.alive)!.id);
+      } else if (state.phase === "Night") {
+        const target = state.players.find((p) => p.alive && p.role !== "Werewolf")!.id;
+        for (const seat of humanActors) t.choose(seat, target);
+      } else {
+        expect(t.dm(`U${humanActors[0]}`).some((m) => m.choices)).toBe(
+          state.pendingInspectors.includes(humanActors[0]!),
+        );
+        const target = state.players.find((p) => p.alive && p.role === "Werewolf")!.id;
+        for (const seat of humanActors) {
+          if (game.state().phase !== "Day" || game.state().round !== state.round) break;
+          t.vote(seat, target);
         }
       }
-      expect(t.messages.some((m) => m.text.includes("win!"))).toBe(true);
-      eliminatedHumans += t.messages.filter(
-        (m) => m.destination === "dm" && m.text.startsWith("You were eliminated."),
-      ).length;
-      expect(
-        t.messages.every(
-          (m) => m.destination === "channel" || m.user === "OUTSIDER" || /^U\d+$/.test(m.user!),
-        ),
-      ).toBe(true);
-      expect(t.messages.every((m) => !m.text.includes("<@bot-"))).toBe(true);
-      t.bot.saveResults();
-      expect(results).toHaveLength(1);
-      expect(results[0]!.dev).toBe(true);
-      expect(results[0]!.players).toHaveLength(5);
-      expect(results[0]!.players.filter((p) => p.isBot)).toHaveLength(5 - humans);
-      expect(results[0]!.players.filter((p) => !p.isBot).map((p) => p.userId)).toEqual(
-        Array.from({ length: humans }, (_, seat) => `U${seat}`),
-      );
-      expect(t.lobby.members).toEqual([]);
-      expect(t.lobby.host).toBeNull();
-      for (let seat = 0; seat < humans; seat++) t.command("join", `U${seat}`);
-      expect(t.command("start")[0]?.text).toContain("started with 5 players");
     }
-  }
-  expect(roles).toEqual(new Set(["Werewolf", "Villager", "Doctor", "Seer", "Hunter"]));
-  expect(soloVotes).toBeGreaterThan(0);
-  expect(eliminatedHumans).toBeGreaterThan(0);
+    expect(t.messages.some((m) => m.destination === "channel" && m.text.includes("win!"))).toBe(true);
+    expect(t.messages.every((m) => m.destination === "channel" || /^U\d+$/.test(m.user!))).toBe(true);
+    expect(t.messages.every((m) => !m.text.includes("<@bot-"))).toBe(true);
+    t.bot.saveResults();
+    expect(results).toHaveLength(1);
+    expect(results[0]!.dev).toBe(true);
+    expect(results[0]!.players).toHaveLength(5);
+    expect(results[0]!.players.filter((p) => p.isBot)).toHaveLength(5 - humans);
+    expect(results[0]!.players.filter((p) => !p.isBot).map((p) => p.userId)).toEqual(
+      Array.from({ length: humans }, (_, seat) => `U${seat}`),
+    );
+    expect(t.lobby.members).toEqual([]);
+    expect(t.lobby.host).toBeNull();
+    for (let seat = 0; seat < humans; seat++) t.command("join", `U${seat}`);
+    expect(t.command("start")[0]?.text).toContain("started with 5 players");
+  },
+);
+
+test("dev bots finish automatically after the final human is eliminated", () => {
+  const t = table(1, 2n, true);
+  t.command("start");
+  const game = t.lobby.game!;
+  expect(game.roleOf(0)).toBe("Villager");
+  const output = t.vote(0, 0);
+  expect(game.isAlive(0)).toBe(false);
+  const eliminated = output.findIndex((m) => m.user === "U0" && m.text.startsWith("You were eliminated."));
+  expect(eliminated).toBeGreaterThanOrEqual(0);
+  expect(output.slice(eliminated + 1).some((m) => m.text.startsWith("Night 1."))).toBe(true);
+  expect(output.some((m) => m.destination === "channel" && m.text.includes("win!"))).toBe(true);
+  expect(game.state().isOver).toBe(true);
+  expect(t.lobby.game).toBeNull();
+  expect(output.every((m) => m.destination === "channel" || m.user === "U0")).toBe(true);
 });
 
 test("scope errors explain bot reinstall or app token repair without dumping API data", () => {

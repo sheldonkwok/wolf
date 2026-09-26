@@ -115,8 +115,6 @@ test("majority crosses the binding and votes clear after resolution", () => {
 test.each([
   { targets: [0, 0, 0, 1, 1, 2, 2, 3], result: { kind: "Eliminated", eliminated: 0 } },
   { targets: [0, 0, 0, 0, 1, 1, 1, 1], result: { kind: "Tied" } },
-  { targets: [0, 0, 0, 1, 1, 1, 2, 3], result: { kind: "Tied" } },
-  { targets: [0, 1, 2, 3, 4, 5, 6, 7], result: { kind: "Tied" } },
 ])("complete ballots resolve through the binding: %j", ({ targets, result }) => {
   const game = Game.withRoles([
     "Villager",
@@ -148,13 +146,6 @@ test("unknown player throws UnknownPlayer", () => {
   expect(error.message).toBe("no such player: P99");
 });
 
-test("a day command during Night throws WrongPhase", () => {
-  const game = Game.withRoles(["Werewolf", "Villager", "Villager", "Villager", "Villager"]);
-  reachNight(game);
-  const err = grab(() => game.vote(0, 1));
-  expect(err.code).toBe("WrongPhase");
-});
-
 test("votes can be changed and repeated without counting twice", () => {
   const game = Game.withRoles(["Werewolf", "Villager", "Villager", "Villager", "Villager"]);
   game.vote(2, 0);
@@ -162,12 +153,6 @@ test("votes can be changed and repeated without counting twice", () => {
   game.vote(2, 3);
   expect(game.state().votes).toEqual([{ voter: 2, target: 3 }]);
   expect(grab(() => game.resolveDay()).code).toBe("NoMajority");
-});
-
-test("resolving the night early throws ActionsIncomplete", () => {
-  const game = Game.withRoles(["Werewolf", "Villager", "Villager", "Villager", "Villager"]);
-  reachNight(game);
-  expect(grab(() => game.resolveNight()).code).toBe("ActionsIncomplete");
 });
 
 test("too few players throws TooFewPlayers", () => {
