@@ -4,7 +4,9 @@ import {
   type DayResult,
   type GameState,
   type InspectionView,
+  MIN_PLAYERS,
   Game as NativeGame,
+  type GameErrorCode as NativeGameErrorCode,
   type NightResult,
   type PlayerView,
   Rng,
@@ -15,28 +17,27 @@ import {
 } from "./native/index.js";
 
 export type { GameState, InspectionView, PlayerView, Role, VoteView, Winner };
-export { Rng, timeSeed };
+export { MIN_PLAYERS, Rng, timeSeed };
 
-// Stable tags mirrored from wolf::GameError::code in the engine crate.
-const GAME_ERROR_CODES = [
-  "TooFewPlayers",
-  "InvalidRoster",
-  "UnknownPlayer",
-  "PlayerNotAlive",
-  "NotAWerewolf",
-  "NotADoctor",
-  "NotASeer",
-  "NotPendingHunter",
-  "LastWolfCannotTargetSelf",
-  "WrongPhase",
-  "AlreadyActed",
-  "NoMajority",
-  "ActionsIncomplete",
-  "GameOver",
-  "Unknown",
-] as const;
+// Typed against the addon's generated union, so a code added in Rust fails typecheck until listed here.
+const GAME_ERROR_CODES: Record<NativeGameErrorCode, true> = {
+  TooFewPlayers: true,
+  InvalidRoster: true,
+  UnknownPlayer: true,
+  PlayerNotAlive: true,
+  NotAWerewolf: true,
+  NotADoctor: true,
+  NotASeer: true,
+  NotPendingHunter: true,
+  LastWolfCannotTargetSelf: true,
+  WrongPhase: true,
+  AlreadyActed: true,
+  NoMajority: true,
+  ActionsIncomplete: true,
+  GameOver: true,
+};
 
-export type GameErrorCode = (typeof GAME_ERROR_CODES)[number];
+export type GameErrorCode = NativeGameErrorCode | "Unknown";
 
 // The addon throws `Error("<Code>: <message>")`; this splits it back apart.
 export class GameError extends Error {
@@ -53,8 +54,9 @@ export class GameError extends Error {
     const raw = thrown instanceof Error ? thrown.message : String(thrown);
     const split = raw.indexOf(": ");
     if (split > 0) {
-      const code = GAME_ERROR_CODES.find((code) => code === raw.slice(0, split));
-      if (code) return new GameError(code, raw.slice(split + 2));
+      const code = raw.slice(0, split);
+      if (Object.hasOwn(GAME_ERROR_CODES, code))
+        return new GameError(code as NativeGameErrorCode, raw.slice(split + 2));
     }
     return new GameError("Unknown", raw);
   }

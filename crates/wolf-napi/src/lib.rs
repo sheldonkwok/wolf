@@ -214,11 +214,56 @@ fn votes_to_views(pairs: impl IntoIterator<Item = (PlayerId, PlayerId)>) -> Vec<
 
 // ----- error bridge -------------------------------------------------------
 
+/// The stable tag prefixed to every thrown game error; generated into the TS `GameErrorCode` union.
+#[napi(string_enum)]
+#[derive(Debug)]
+pub enum GameErrorCode {
+    TooFewPlayers,
+    InvalidRoster,
+    UnknownPlayer,
+    PlayerNotAlive,
+    NotAWerewolf,
+    NotADoctor,
+    NotASeer,
+    NotPendingHunter,
+    LastWolfCannotTargetSelf,
+    WrongPhase,
+    AlreadyActed,
+    NoMajority,
+    ActionsIncomplete,
+    GameOver,
+}
+
+impl From<&GameError> for GameErrorCode {
+    fn from(e: &GameError) -> Self {
+        match e {
+            GameError::TooFewPlayers { .. } => GameErrorCode::TooFewPlayers,
+            GameError::InvalidRoster(_) => GameErrorCode::InvalidRoster,
+            GameError::UnknownPlayer(_) => GameErrorCode::UnknownPlayer,
+            GameError::PlayerNotAlive(_) => GameErrorCode::PlayerNotAlive,
+            GameError::NotAWerewolf(_) => GameErrorCode::NotAWerewolf,
+            GameError::NotADoctor(_) => GameErrorCode::NotADoctor,
+            GameError::NotASeer(_) => GameErrorCode::NotASeer,
+            GameError::NotPendingHunter(_) => GameErrorCode::NotPendingHunter,
+            GameError::LastWolfCannotTargetSelf => GameErrorCode::LastWolfCannotTargetSelf,
+            GameError::WrongPhase { .. } => GameErrorCode::WrongPhase,
+            GameError::AlreadyActed(_) => GameErrorCode::AlreadyActed,
+            GameError::NoMajority => GameErrorCode::NoMajority,
+            GameError::ActionsIncomplete { .. } => GameErrorCode::ActionsIncomplete,
+            GameError::GameOver => GameErrorCode::GameOver,
+        }
+    }
+}
+
 fn to_js(e: GameError) -> napi::Error {
-    napi::Error::from_reason(format!("{}: {e}", e.code()))
+    napi::Error::from_reason(format!("{:?}: {e}", GameErrorCode::from(&e)))
 }
 
 // ----- Game ------------------------------------------------------------------
+
+/// The fewest players a game can be built with.
+#[napi]
+pub const MIN_PLAYERS: u32 = Engine::MIN_PLAYERS as u32;
 
 #[napi]
 pub struct Game {

@@ -1,4 +1,6 @@
 import type { App } from "@slack/bolt";
+import { Lobby } from "../lobby.js";
+import { VOTE_COMMAND, votingRules } from "./copy.js";
 
 export function registerHome(app: App, team: string, channel: string, bot: string): void {
   app.event("app_home_opened", async ({ event, body, client }) => {
@@ -20,7 +22,7 @@ export function registerHome(app: App, team: string, channel: string, bot: strin
             type: "section",
             text: {
               type: "mrkdwn",
-              text: `*Get started*\nIn <#${channel}>, mention <@${bot}> with \`join\` to enter the lobby. The first player is the host and can use \`start\` once 5–12 players have joined.\nMention the bot with \`status\` to see the game or \`help\` for all commands.`,
+              text: `*Get started*\nIn <#${channel}>, mention <@${bot}> with \`join\` to enter the lobby. The first player is the host and can use \`start\` once ${Lobby.MIN_PLAYERS}–${Lobby.MAX_PLAYERS} players have joined.\nMention the bot with \`status\` to see the game or \`help\` for all commands.`,
             },
           },
           {
@@ -41,7 +43,7 @@ export function registerHome(app: App, team: string, channel: string, bot: strin
             type: "section",
             text: {
               type: "mrkdwn",
-              text: "*Day voting*\nVote publicly with `@werewolf vote @player`. A strict majority (more than half of living players) eliminates a player immediately. Otherwise, once every living player has voted, the player with the most votes is eliminated. A tie for the most votes eliminates nobody and night begins. You can change your vote until a majority is reached or everyone has voted. Votes reset each day.",
+              text: `*Day voting*\nVote publicly with ${VOTE_COMMAND}. ${votingRules()} Votes reset each day.`,
             },
           },
           {

@@ -1,6 +1,7 @@
 import { expect, test } from "bun:test";
 import type { App } from "@slack/bolt";
 import manifest from "../slack/manifest.json";
+import { votingRules } from "./slack/copy.js";
 import { registerHome } from "./slack/home.js";
 
 test("Home is enabled and subscribed in the manifest", () => {
@@ -54,11 +55,12 @@ test("opening Home publishes instructions only for the configured workspace and 
   expect(page).toContain("using DM dropdowns");
   expect(page).not.toContain("buttons");
   expect(page).toContain("*Day voting*");
-  expect(page).toContain(
-    "A strict majority (more than half of living players) eliminates a player immediately",
-  );
-  expect(page).toContain("once every living player has voted, the player with the most votes is eliminated");
-  expect(page).toContain("A tie for the most votes eliminates nobody and night begins");
+  expect(page).toContain("5–12 players");
+  expect(page).toContain("Vote publicly with `@werewolf vote @player`.");
+  expect(page).toContain(votingRules());
+  expect(page).toContain("A strict majority (more than half of living players) eliminates a player early");
+  expect(page).toContain("once all living players vote, the unique leader (plurality) is eliminated");
+  expect(page).toContain("a tie for the most votes eliminates nobody. Night then begins");
   expect(page).toContain("change your vote until a majority is reached or everyone has voted");
   expect(page).toContain("*Winning*");
   expect(page).toContain("*Lifetime stats*");

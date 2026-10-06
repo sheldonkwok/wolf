@@ -32,6 +32,11 @@ export function roleTag(role: Role): string {
   return role;
 }
 
+// How a seer's result reads: alignment only, never the exact innocent role.
+export function verdict(isWerewolf: boolean): string {
+  return isWerewolf ? "a Werewolf" : "innocent";
+}
+
 export function banner(title: string, state: GameState, reveal: boolean): void {
   console.log(`\n── ${title} ${"─".repeat(30)}`);
   if (reveal) printRoster(state);

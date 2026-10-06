@@ -1,7 +1,7 @@
 // The pre-game roster: people join in order, the first is the host, and only the
 // host may start the engine the lobby then owns. Ported from the old Rust `wolf::Lobby`.
 
-import { Game } from "./engine.js";
+import { Game, MIN_PLAYERS } from "./engine.js";
 
 // An opaque platform user handle, such as a Slack or Discord user id; the key that identifies a member.
 export type UserId = string;
@@ -37,8 +37,8 @@ export class LobbyError extends Error {
 }
 
 export class Lobby {
-  // Matches wolf::Engine::MIN_PLAYERS.
-  static readonly MIN_PLAYERS = 5;
+  // The engine's own minimum, read from the addon.
+  static readonly MIN_PLAYERS = MIN_PLAYERS;
   // The most members a lobby holds, matching the top of the rules' player table.
   static readonly MAX_PLAYERS = 12;
 

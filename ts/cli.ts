@@ -2,19 +2,18 @@
 // engine by hand. The engine and PRNG are the Rust addon; everything else is here.
 
 import {
+  ballotClosed,
+  botDayInspection,
+  botDayVotes,
+  botNightActions,
   isWolf,
   livingIds,
   livingWolves,
   pick,
-  randomLivingOther,
   randomLivingVillager,
-  villagerBotVote,
 } from "./bots.js";
-import { Game, type GameState, Rng, timeSeed } from "./engine.js";
-import { banner, nameOf, printRoster, roleTag } from "./render.js";
-
-// Matches wolf::Engine::MIN_PLAYERS.
-const MIN_PLAYERS = 5;
+import { Game, type GameState, MIN_PLAYERS, Rng, timeSeed } from "./engine.js";
+import { banner, nameOf, printRoster, roleTag, verdict } from "./render.js";
 
 const HELP = `wolf — play a game of werewolf against bots
 
@@ -178,6 +177,9 @@ export class Table {
     return this.game.isAlive(this.me);
   }
 
+  // Every seat but the human's is a bot.
+  private isBot = (seat: number): boolean => seat !== this.me;
+
   // Ask the human to pick one of `choices`, accepting a seat number or a name prefix.
   private async promptPlayer(question: string, choices: number[]): Promise<number | null> {
     console.log(question);
@@ -221,53 +223,34 @@ export class Table {
   private async runNight(): Promise<boolean> {
     this.drawBanner(`Night ${this.state().round}`);
 
-    let target: number;
     if (this.iAmAlive() && this.iAmWolf()) {
       const choices = livingIds(this.state()).filter((id) => id !== this.me);
       const picked = await this.promptPlayer("Werewolves, pick your target.", choices);
       if (picked === null) return false;
-      target = picked;
+      this.game.nightAction(this.me, picked);
     } else {
       console.log(
         this.iAmAlive()
           ? "The village sleeps while the night roles act."
           : "Night falls on the village. Everyone close your eyes.",
       );
-      target = randomLivingVillager(this.state(), this.rng);
     }
 
-    for (const actor of this.state().pendingActors) {
-      const role = this.game.roleOf(actor);
-      if (role !== "Doctor" && role !== "Seer") continue;
-      let chosen: number;
-      if (actor === this.me) {
-        const picked = await this.promptPlayer(
-          role === "Doctor"
-            ? "Doctor, choose someone to protect (you may choose yourself)."
-            : "Seer, choose someone to inspect.",
-          livingIds(this.state()),
-        );
-        if (picked === null) return false;
-        chosen = picked;
-      } else {
-        chosen =
-          role === "Doctor"
-            ? pick(this.rng, livingIds(this.state()))
-            : randomLivingOther(this.state(), this.rng, actor);
-      }
-      if (role === "Doctor") this.game.doctorAction(actor, chosen);
-      else {
-        const result = this.game.seerAction(actor, chosen);
-        if (actor === this.me)
-          console.log(`${nameOf(chosen)} is ${result.isWerewolf ? "a Werewolf" : "innocent"}.`);
-      }
+    const role = this.game.roleOf(this.me);
+    if (this.state().pendingActors.includes(this.me) && (role === "Doctor" || role === "Seer")) {
+      const picked = await this.promptPlayer(
+        role === "Doctor"
+          ? "Doctor, choose someone to protect (you may choose yourself)."
+          : "Seer, choose someone to inspect.",
+        livingIds(this.state()),
+      );
+      if (picked === null) return false;
+      if (role === "Doctor") this.game.doctorAction(this.me, picked);
+      else console.log(`${nameOf(picked)} is ${verdict(this.game.seerAction(this.me, picked).isWerewolf)}.`);
     }
 
-    let wolfPick = target;
     for (;;) {
-      for (const wolf of livingWolves(this.state())) {
-        this.game.nightAction(wolf, wolfPick);
-      }
+      botNightActions(this.game, this.rng, this.isBot);
       const outcome = this.game.resolveNight();
       if (outcome.kind !== "NoConsensus") {
         this.nightVictim = outcome.kind === "Killed" ? outcome.killed : null;
@@ -276,7 +259,8 @@ export class Table {
       }
       // The pack is always unanimous, so this is only a safety net.
       console.log("The pack split and nobody died. They pick again.");
-      wolfPick = randomLivingVillager(this.state(), this.rng);
+      const repick = randomLivingVillager(this.state(), this.rng);
+      for (const wolf of livingWolves(this.state())) this.game.nightAction(wolf, repick);
     }
 
     if (!this.iAmAlive()) await this.waitForEnter();
@@ -312,7 +296,7 @@ export class Table {
     console.log(
       `${this.state().majorityRequired} votes eliminate a player immediately. Otherwise, once everyone votes, the unique leader is eliminated; a top tie eliminates no one. Votes can change until the ballot closes.`,
     );
-    const ready = () => this.state().majorityTarget != null || this.state().pendingActors.length === 0;
+    const ready = () => ballotClosed(this.state());
     while (!ready()) {
       let myVote: number | null = null;
       if (this.iAmAlive()) {
@@ -323,17 +307,9 @@ export class Table {
         console.log(`${nameOf(this.me)} → ${nameOf(picked)}`);
       }
       if (ready()) break;
-      const wolfTarget =
-        this.iAmAlive() && this.iAmWolf() ? myVote! : randomLivingVillager(this.state(), this.rng);
-      for (const id of livingIds(this.state()).filter((id) => id !== this.me)) {
-        if (ready()) break;
-        const target =
-          !this.iAmAlive() || isWolf(this.state(), id)
-            ? wolfTarget
-            : villagerBotVote(this.state(), this.rng, myVote, id);
-        this.game.vote(id, target);
-        console.log(`${nameOf(id)} → ${nameOf(target)}`);
-      }
+      botDayVotes(this.game, this.rng, this.isBot, myVote, (voter, target) =>
+        console.log(`${nameOf(voter)} → ${nameOf(target)}`),
+      );
     }
     const outcome = this.game.resolveDay();
     if (outcome.kind === "Eliminated") {
@@ -350,19 +326,14 @@ export class Table {
 
   // The Seer's only daytime inspection, available on Day 1.
   private async runDayInspection(): Promise<boolean> {
-    const seer = this.state().pendingInspectors[0];
-    if (seer === undefined) return true;
-    const target =
-      seer === this.me
-        ? await this.promptPlayer(
-            "Seer, inspect one player now. This Day 1 inspection is your only daytime look.",
-            livingIds(this.state()),
-          )
-        : randomLivingOther(this.state(), this.rng, seer);
+    botDayInspection(this.game, this.rng, this.isBot);
+    if (!this.state().pendingInspectors.includes(this.me)) return true;
+    const target = await this.promptPlayer(
+      "Seer, inspect one player now. This Day 1 inspection is your only daytime look.",
+      livingIds(this.state()),
+    );
     if (target === null) return false;
-    const result = this.game.seerAction(seer, target);
-    if (seer === this.me)
-      console.log(`${nameOf(target)} is ${result.isWerewolf ? "a Werewolf" : "innocent"}.`);
+    console.log(`${nameOf(target)} is ${verdict(this.game.seerAction(this.me, target).isWerewolf)}.`);
     return true;
   }
 

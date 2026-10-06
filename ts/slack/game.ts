@@ -1,14 +1,17 @@
 import {
+  ballotClosed,
+  botDayInspection,
+  botDayVotes,
+  botNightActions,
   livingIds,
   livingWolves,
   pick,
-  randomLivingOther,
-  randomLivingVillager,
-  villagerBotVote,
 } from "../bots.js";
 import type { ChannelStats, FinishedGame, PlayerStats } from "../db/index.js";
 import { GameError, Rng, timeSeed } from "../engine.js";
 import { Lobby, LobbyError } from "../lobby.js";
+import { verdict } from "../render.js";
+import { VOTE_COMMAND, votingRules, votingSummary } from "./copy.js";
 import { channelStats, personalStats } from "./stats.js";
 
 export interface Choice {
@@ -30,8 +33,7 @@ export type SlackInput = {
   channel: string;
 } & ({ kind: "mention" | "dm"; text: string } | { kind: "choice"; value: string });
 
-const HELP =
-  "In the game channel: `@werewolf join`, `leave`, `start`, `end`, `status`, `stats`, `vote @player`, or `help`. The first player is host; only the host starts or ends games. Use `@werewolf end` to cancel the game and open a fresh lobby. During the day, vote publicly with `@werewolf vote @player`. A strict majority (more than half of living players) eliminates a player early. Otherwise, once all living players vote, the unique leader (plurality) is eliminated; a tie for the most votes eliminates nobody. Night then begins. Repeat the command to change your vote before a majority is reached or everyone has voted. Every game starts on Day 1. A Seer may privately inspect one player during Day 1 using DM dropdowns; if Day 1 ends first, that inspection is skipped. Use DM dropdowns for the Seer's Day 1 inspection, night actions, and the Hunter's final shot. DM `status` to get your role, inspection history, and current prompt again. DM `stats` for your lifetime wins, losses, and team breakdowns; use `@werewolf stats` in the channel for team win rates and the top 3 most frequent wolves. Stats count completed games in this channel, excluding dev games and bots.";
+const HELP = `In the game channel: \`@werewolf join\`, \`leave\`, \`start\`, \`end\`, \`status\`, \`stats\`, \`vote @player\`, or \`help\`. The first player is host; only the host starts or ends games. Use \`@werewolf end\` to cancel the game and open a fresh lobby. During the day, vote publicly with ${VOTE_COMMAND}. ${votingRules()} Every game starts on Day 1. A Seer may privately inspect one player during Day 1 using DM dropdowns; if Day 1 ends first, that inspection is skipped. Use DM dropdowns for the Seer's Day 1 inspection, night actions, and the Hunter's final shot. DM \`status\` to get your role, inspection history, and current prompt again. DM \`stats\` for your lifetime wins, losses, and team breakdowns; use \`@werewolf stats\` in the channel for team win rates and the top 3 most frequent wolves. Stats count completed games in this channel, excluding dev games and bots.`;
 
 export class SlackGame {
   private readonly seen = new Set<string>();
@@ -83,7 +85,7 @@ export class SlackGame {
               : "Stats are unavailable right now.",
           );
         } else if (/^(vote|ready)\b/i.test(input.text.trim())) {
-          this.dm(input.user, `Vote in <#${this.channel}> with \`@werewolf vote @player\`.`);
+          this.dm(input.user, `Vote in <#${this.channel}> with ${VOTE_COMMAND}.`);
         } else this.privateStatus(input.user);
       } else this.command(input.user, input.text.trim());
     } catch (error) {
@@ -166,7 +168,7 @@ export class SlackGame {
     const mention = /^vote\s+<@([A-Z0-9]+)(?:\|[^>]+)?>$/i.exec(command);
     const botSeat = this.dev ? /^vote\s+(\d+)$/i.exec(command) : null;
     const target = mention ? this.lobby.seatOf(mention[1]!) : botSeat ? Number(botSeat[1]) - 1 : null;
-    if (!mention && !botSeat) throw new CommandError("Use `@werewolf vote @player` to mention one player.");
+    if (!mention && !botSeat) throw new CommandError(`Use ${VOTE_COMMAND} to mention one player.`);
     if (target === null || !Number.isSafeInteger(target) || !this.lobby.memberAt(target))
       throw new CommandError("Unknown target. Mention a player in this game.");
     game.vote(seat, target);
@@ -205,7 +207,7 @@ export class SlackGame {
       const result = game.seerAction(seat, target);
       this.dm(
         user,
-        `Your Day ${result.round} inspection: ${this.mention(result.target)} is ${result.isWerewolf ? "a Werewolf" : "innocent"}.`,
+        `Your Day ${result.round} inspection: ${this.mention(result.target)} is ${verdict(result.isWerewolf)}.`,
       );
       return;
     }
@@ -216,10 +218,7 @@ export class SlackGame {
           break;
         case "Seer": {
           const result = game.seerAction(seat, target);
-          this.dm(
-            user,
-            `Your inspection: ${this.mention(result.target)} is ${result.isWerewolf ? "a Werewolf" : "innocent"}.`,
-          );
+          this.dm(user, `Your inspection: ${this.mention(result.target)} is ${verdict(result.isWerewolf)}.`);
           break;
         }
         default:
@@ -231,6 +230,7 @@ export class SlackGame {
   }
 
   private advance(humanVote: number | null = null): void {
+    const isBot = (seat: number) => this.isBot(seat);
     while (this.lobby.game) {
       const game = this.lobby.game;
       const state = game.state();
@@ -242,44 +242,16 @@ export class SlackGame {
         continue;
       }
       if (state.phase === "Day") {
-        const seer = state.pendingInspectors[0];
-        if (seer !== undefined && this.isBot(seer))
-          game.seerAction(seer, randomLivingOther(state, this.rng, seer));
-        if (state.majorityTarget == null && state.pendingActors.length > 0) {
+        botDayInspection(game, this.rng, isBot);
+        if (!ballotClosed(state)) {
           const humansAlive = state.players.some((p) => p.alive && !this.isBot(p.id));
           if (humansAlive && humanVote === null) return;
-          const wolfVote = state.votes.find(
-            (v) => !this.isBot(v.voter) && game.roleOf(v.voter) === "Werewolf",
-          )?.target;
-          const wolfTarget = wolfVote ?? randomLivingVillager(state, this.rng);
-          for (const player of state.players.filter((p) => p.alive && this.isBot(p.id))) {
-            const target =
-              !humansAlive || player.role === "Werewolf"
-                ? wolfTarget
-                : villagerBotVote(state, this.rng, humanVote, player.id);
-            game.vote(player.id, target);
-            this.announceVote(player.id, target);
-            const ballot = game.state();
-            if (ballot.majorityTarget != null || ballot.pendingActors.length === 0) break;
-          }
-          const ballot = game.state();
-          if (ballot.majorityTarget == null && ballot.pendingActors.length > 0) return;
+          botDayVotes(game, this.rng, isBot, humanVote, (voter, target) => this.announceVote(voter, target));
+          if (!ballotClosed(game.state())) return;
         }
       } else {
         if (state.pendingActors.some((seat) => !this.isBot(seat))) return;
-        const target = state.nightPicks[0]?.target ?? randomLivingVillager(state, this.rng);
-        for (const seat of state.pendingActors) {
-          switch (game.roleOf(seat)) {
-            case "Doctor":
-              game.doctorAction(seat, pick(this.rng, livingIds(state)));
-              break;
-            case "Seer":
-              game.seerAction(seat, randomLivingOther(state, this.rng, seat));
-              break;
-            default:
-              game.nightAction(seat, target);
-          }
-        }
+        botNightActions(game, this.rng, isBot);
       }
       if (!this.resolvePhase()) return;
       humanVote = null;
@@ -358,7 +330,7 @@ export class SlackGame {
       this.promptActors();
     } else {
       this.publish(
-        `Day ${state.round}. Discuss in <#${this.channel}> and vote with \`@werewolf vote @player\`. A strict majority of ${state.majorityRequired} votes eliminates a player early. Otherwise, once all living players vote, the unique leader (plurality) is eliminated; a tie for the most votes eliminates nobody. Night then begins. You can change your vote until a majority is reached or everyone has voted.${this.dev ? " To target a dev bot, use its player number: @werewolf vote 3." : ""}\n${this.livingRoster()}`,
+        `Day ${state.round}. Discuss in <#${this.channel}> and vote with ${VOTE_COMMAND}. ${votingRules(state.majorityRequired)}${this.dev ? " To target a dev bot, use its player number: @werewolf vote 3." : ""}\n${this.livingRoster()}`,
       );
       this.promptActors();
     }
@@ -441,7 +413,7 @@ export class SlackGame {
     for (const result of this.lobby.game.state().inspections.filter((result) => result.seer === seat)) {
       this.dm(
         user,
-        `${result.phase} ${result.round} inspection: ${this.mention(result.target)} is ${result.isWerewolf ? "a Werewolf" : "innocent"}.`,
+        `${result.phase} ${result.round} inspection: ${this.mention(result.target)} is ${verdict(result.isWerewolf)}.`,
       );
     }
     this.dm(user, this.status());
@@ -470,7 +442,7 @@ export class SlackGame {
     if (!state) return this.roster();
     if (state.phase === "Day") {
       const livingCount = state.players.filter((player) => player.alive).length;
-      return `Day ${state.round}.\n${this.voteLeaderboard()}\nVote with \`@werewolf vote @player\`.\nLiving players: ${livingCount}.`;
+      return `Day ${state.round}.\n${this.voteLeaderboard()}\nVote with ${VOTE_COMMAND}.\nLiving players: ${livingCount}.`;
     }
     const night =
       state.phase === "Night"
@@ -500,11 +472,11 @@ export class SlackGame {
     const notVoted = state.players
       .filter((player) => player.alive && !voted.has(player.id))
       .map((player) => this.mention(player.id));
-    return `Vote leaderboard (${state.majorityRequired} for an early majority; all living players voted: unique plurality is eliminated, top tie eliminates nobody):\n${rows.length ? rows.join("\n") : "No votes yet."}\nNot voted: ${notVoted.length ? notVoted.join(", ") : "Nobody"}.`;
+    return `Vote leaderboard (${votingSummary(state.majorityRequired)}):\n${rows.length ? rows.join("\n") : "No votes yet."}\nNot voted: ${notVoted.length ? notVoted.join(", ") : "Nobody"}.`;
   }
 
   private roster(): string {
-    return `Lobby: ${this.lobby.size}/${Lobby.MAX_PLAYERS} players (${this.dev ? "dev mode: minimum 1 human, bots fill to 5" : `minimum ${Lobby.MIN_PLAYERS}`}). Host: ${this.lobby.host ? `<@${this.lobby.host.user}>` : "none"}.\n${this.lobby.members.map((_, seat) => this.mention(seat)).join(", ")}`;
+    return `Lobby: ${this.lobby.size}/${Lobby.MAX_PLAYERS} players (${this.dev ? `dev mode: minimum 1 human, bots fill to ${Lobby.MIN_PLAYERS}` : `minimum ${Lobby.MIN_PLAYERS}`}). Host: ${this.lobby.host ? `<@${this.lobby.host.user}>` : "none"}.\n${this.lobby.members.map((_, seat) => this.mention(seat)).join(", ")}`;
   }
 
   private livingRoster(): string {
