@@ -1,6 +1,7 @@
 import type { App } from "@slack/bolt";
 import { Lobby } from "../lobby.js";
 import { VOTE_COMMAND, votingRules } from "./copy.js";
+import { roleSelection, rolesList, winningRules } from "./rules.js";
 
 export function registerHome(app: App, team: string, channel: string, bot: string): void {
   app.event("app_home_opened", async ({ event, body, client }) => {
@@ -50,21 +51,24 @@ export function registerHome(app: App, team: string, channel: string, bot: strin
             type: "section",
             text: {
               type: "mrkdwn",
-              text: "*Roles*\n• *Villager* — Find the Werewolves through discussion and daytime votes. No night action.\n• *Werewolf* — Know your pack and agree on one player to eliminate each night. Blend in during the day.\n• *Doctor* — Protect one player each night, including yourself. If the pack attacks that player, they survive.\n• *Seer* — Inspect one living player during Day 1 and each night to privately learn whether they are a Werewolf, not their exact innocent role. Day 1 is your only daytime inspection; missing it skips only that inspection, and your Night 1 action is unaffected.\n• *Hunter* — On the village team, with no night action. When eliminated by a vote, the Werewolves, or the Witch's poison, choose one living player to take down using DM dropdowns. A saved or healed Hunter does not shoot, and neither the Doctor nor the Witch can stop the shot. Play and victory checks wait for your shot.\n• *Witch* — On the village team, with one healing potion and one poison for the whole game. Each night, after the Werewolves choose, heal their target (including yourself), poison another player, or do nothing; one potion per night at most, and your choice is final. While you hold the healing potion you are told who was attacked. The Doctor cannot stop the poison, and a night can eliminate two players.",
+              text: `*Roles*
+${rolesList()}`,
             },
           },
           {
             type: "section",
             text: {
               type: "mrkdwn",
-              text: "*Role selection*\nWerewolves fill one third of the seats, rounded down (at least one). Among the remaining players, up to the greater of two or 33% (rounded down) receive distinct special roles randomly chosen from Doctor, Seer, Hunter, and Witch. Remaining seats are ordinary Villagers; not every game includes every special role.",
+              text: `*Role selection*
+${roleSelection()}`,
             },
           },
           {
             type: "section",
             text: {
               type: "mrkdwn",
-              text: "*Winning*\nVillagers, the Doctor, the Seer, the Hunter, and the Witch win together when all Werewolves are eliminated. Werewolves win when they equal or outnumber all other living players. The bot moderates; the host is a player, not a separate role.",
+              text: `*Winning*
+${winningRules()} The bot moderates; the host is a player, not a separate role.`,
             },
           },
         ],

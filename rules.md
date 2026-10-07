@@ -1,4 +1,4 @@
-# Werewolf (Mafia) — Game Rules & Guide for Kids
+# Werewolf (Mafia) — Game Rules 
 
 **Werewolf** (also known as *Mafia*) is a fun party game of secret identities, deduction, and bluffing. One team tries to protect the village, while the secret Werewolves try to take over!
 
@@ -105,11 +105,3 @@ After the night actions resolve, check for a winner. If the game continues, begi
 * 🐺 **Werewolves Win:** When the number of living Werewolves equals or exceeds the number of all other living players, including special village roles.
 
 All of a night's eliminations happen together at dawn, before either victory condition is checked; poisoning the last Werewolf wins the game for the village even if the pack's attack also lands. If the Hunter has a final shot pending, resolve it before checking either victory condition.
-
----
-
-## Quick Tips for Playing with Kids
-
-1. **Keep it Light:** Remind eliminated players that they are still part of the fun as "ghost observers."
-2. **Prevent Peeking:** Ask kids to tap their knees gently on their lap during the night phase to create noise and disguise movement.
-3. **Short Debates:** Set a 3-minute timer for the daytime discussion to keep the game moving fast!

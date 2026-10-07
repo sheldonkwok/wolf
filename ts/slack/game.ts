@@ -12,6 +12,7 @@ import { GameError, Rng, timeSeed } from "../engine.js";
 import { Lobby, LobbyError } from "../lobby.js";
 import { verdict } from "../render.js";
 import { VOTE_COMMAND, votingRules, votingSummary } from "./copy.js";
+import { roleBlurb } from "./rules.js";
 import { channelStats, personalStats } from "./stats.js";
 
 export interface Choice {
@@ -35,7 +36,7 @@ export type SlackInput = {
   channel: string;
 } & ({ kind: "mention" | "dm"; text: string } | { kind: "choice"; value: string });
 
-const HELP = `In the game channel: \`@werewolf join\`, \`leave\`, \`start\`, \`end\`, \`status\`, \`stats\`, \`vote @player\`, or \`help\`. The first player is host; only the host starts or ends games. Use \`@werewolf end\` to cancel the game and open a fresh lobby. During the day, vote publicly with ${VOTE_COMMAND}. ${votingRules()} Every game starts on Day 1. A Seer may privately inspect one player during Day 1 using DM dropdowns; if Day 1 ends first, that inspection is skipped. A Witch acts each night after the Werewolves choose, with one healing potion and one poison for the whole game. Use DM dropdowns for the Seer's Day 1 inspection, night actions, and the Hunter's final shot. DM \`status\` to get your role, inspection history, and current prompt again. DM \`stats\` for your lifetime wins, losses, and team breakdowns; use \`@werewolf stats\` in the channel for team win rates and the top 3 most frequent wolves. Stats count completed games in this channel, excluding dev games and bots.`;
+const HELP = `In the game channel: \`@werewolf join\`, \`leave\`, \`start\`, \`end\`, \`status\`, \`stats\`, \`vote @player\`, or \`help\`. The first player is host; only the host starts or ends games. Use \`@werewolf end\` to cancel the game and open a fresh lobby. During the day, vote publicly with ${VOTE_COMMAND}. ${votingRules()} Every game starts on Day 1. A Seer may privately inspect one player during Day 1 using DM dropdowns; if Day 1 ends first, that inspection is skipped. Use DM dropdowns for the Seer's Day 1 inspection, night actions, and the Hunter's final shot. DM \`status\` to get your role, inspection history, and current prompt again. DM \`stats\` for your lifetime wins, losses, and team breakdowns; use \`@werewolf stats\` in the channel for team win rates and the top 3 most frequent wolves. Stats count completed games in this channel, excluding dev games and bots.`;
 
 export class SlackGame {
   private readonly seen = new Set<string>();
@@ -455,15 +456,7 @@ export class SlackGame {
             .players.filter((p) => p.role === "Werewolf")
             .map((p) => this.mention(p.id))
             .join(", ")}. Coordinate privately.`
-        : role === "Doctor"
-          ? " Each night, protect one player, including yourself, from the werewolves. You win with the village."
-          : role === "Seer"
-            ? " During Day 1 only, you may inspect one living player privately; if Day 1 ends before you choose, that inspection is skipped. Each night, inspect one player to learn privately whether they are a werewolf or innocent. You win with the village."
-            : role === "Hunter"
-              ? " If eliminated, choose one living player to take down with your final shot. You win with the village."
-              : role === "Witch"
-                ? " You hold one healing potion and one poison for the whole game. Each night, after the werewolves choose, you may heal their target, poison another player, or do nothing, using at most one potion per night. While you still hold the healing potion you are told who was attacked. You win with the village."
-                : " Find the werewolves through discussion and voting.";
+        : ` ${roleBlurb(role)}`;
     this.dm(
       user,
       `You are Player ${seat + 1}, a ${role}.${pack}${game.isAlive(seat) ? "" : " You were eliminated and are now a spectator."}`,

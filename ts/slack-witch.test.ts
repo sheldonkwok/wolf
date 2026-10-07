@@ -83,7 +83,7 @@ const channel = (output: SlackMessage[]) =>
 test("the Witch is prompted privately only after the pack, Doctor, and Seer have acted", () => {
   const t = table(FULL);
   expect(t.start.find((m) => m.user === "U2" && m.text.includes("You are Player"))?.text).toContain(
-    "a Witch. You hold one healing potion and one poison for the whole game.",
+    "a Witch. The potion-maker. Holds one healing potion and one poison for the whole game.",
   );
   const night = t.tieDay();
   expect(

@@ -36,30 +36,21 @@ test("opening Home publishes instructions only for the configured workspace and 
   expect(JSON.stringify(published[0])).toContain("<#C1>");
   expect(JSON.stringify(published[0])).toContain("<@B1>");
   const page = JSON.stringify(published[0]);
-  for (const role of ["Villager", "Werewolf", "Doctor", "Seer", "Hunter", "Witch"]) {
-    expect(page).toContain(`*${role}* —`);
+  for (const role of ["Villagers", "Werewolves", "Doctor", "Seer", "Hunter", "Witch"]) {
+    expect(page).toContain(`${role}:* `);
   }
   expect(page).toContain("*Role selection*");
-  expect(page).toContain("not every game includes every special role");
-  expect(page).toContain("neither the Doctor nor the Witch can stop the shot");
-  expect(page).toContain("When eliminated by a vote, the Werewolves, or the Witch's poison");
-  expect(page).toContain("one healing potion and one poison for the whole game");
-  expect(page).toContain("one potion per night at most");
-  expect(page).toContain("While you hold the healing potion you are told who was attacked");
-  expect(page).toContain("a night can eliminate two players");
-  expect(page).toContain("randomly chosen from Doctor, Seer, Hunter, and Witch");
-  expect(page).toContain("the Hunter, and the Witch win together");
-  expect(page).toContain("Play and victory checks wait for your shot");
+  expect(page).toContain("Games have at least 5 players");
+  expect(page).toContain("randomly without replacement from Doctor, Seer, Hunter, and Witch");
+  expect(page).toContain("Holds one healing potion and one poison for the whole game");
+  expect(page).toContain("resolve it before checking either victory condition");
   expect(page).toContain("Every game starts on Day 1 as soon as roles are dealt");
   expect(page).toContain("one private inspection during Day 1, their only daytime inspection");
   expect(page).toContain("if Day 1 ends before they choose, it is skipped");
   expect(page).toContain("Public messages do not reveal whether a Seer exists or has acted");
-  expect(page).toContain("Inspect one living player during Day 1 and each night");
-  expect(page).toContain("Day 1 is your only daytime inspection");
   expect(page).not.toMatch(/opening|60–120/i);
   expect(page).toContain("private inspection history");
   expect(page).toContain("night-action dropdowns");
-  expect(page).toContain("using DM dropdowns");
   expect(page).not.toContain("buttons");
   expect(page).toContain("*Day voting*");
   expect(page).toContain("5–12 players");

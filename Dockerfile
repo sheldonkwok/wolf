@@ -35,6 +35,7 @@ COPY package.json ./
 COPY --from=dependencies /app/node_modules ./node_modules/
 COPY ts/ ./ts/
 COPY --from=build /app/ts/native ./ts/native/
+COPY rules.md ./rules.md
 COPY slack/manifest.json ./slack/manifest.json
 COPY drizzle/ ./drizzle/
 COPY --chmod=755 docker-entrypoint.sh /usr/local/bin/wolf-entrypoint
