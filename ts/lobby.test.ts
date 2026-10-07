@@ -43,7 +43,12 @@ function playOut(game: Game): void {
         if (player.role === "Doctor") game.doctorAction(player.id, wolves[0]!);
         if (player.role === "Seer") game.seerAction(player.id, wolves[0]!);
       }
-      expect(game.resolveNight().kind).toBe("Killed");
+      let night = game.resolveNight();
+      if (night.kind === "AwaitingWitch") {
+        game.witchPass(game.state().pendingActors[0]!);
+        night = game.resolveNight();
+      }
+      expect(night).toEqual({ kind: "Dawn", saved: null, deaths: [victim] });
     } else {
       const living = s.players.filter((p) => p.alive).map((p) => p.id);
       const target = s.players.find((p) => p.alive && p.role === "Werewolf")!.id;
@@ -176,7 +181,7 @@ test("starting below the minimum is rejected", () => {
 
 test("a successful start hands over a fresh engine", () => {
   const lobby = lobbyWith(7);
-  const game = lobby.startWithSeed("u0", 1n);
+  const game = lobby.startWithSeed("u0", 2n);
   expect(game.state().players.length).toBe(7);
   expect(game.state().phase).toBe("Day");
   expect(game.state().round).toBe(1);

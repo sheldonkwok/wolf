@@ -6,6 +6,8 @@ mod error;
 mod player;
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod witch_tests;
 
 pub use error::GameError;
 pub use player::{Player, PlayerId, Role};
@@ -13,7 +15,7 @@ pub use player::{Player, PlayerId, Role};
 /// The current stage of the game.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Phase {
-    /// Living night roles act; resolved with [`Engine::resolve_night`].
+    /// Living night roles act, then the witch once the pack's target is locked; resolved with [`Engine::resolve_night`].
     Night,
     /// Players vote until a strict majority or a complete ballot; the seer may also inspect once on Day 1.
     Day,
@@ -33,12 +35,26 @@ pub enum Winner {
 /// The result of resolving a night.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum NightOutcome {
-    /// The werewolves' target was eliminated.
-    Killed(PlayerId),
-    /// The doctor protected the werewolves' target.
-    Saved(PlayerId),
+    /// The night is over: `saved` is the attacked player if they lived, and `deaths` are in id order without causes.
+    Dawn {
+        saved: Option<PlayerId>,
+        deaths: Vec<PlayerId>,
+    },
     /// The pack named more than one target; nobody died and they pick again.
     NoConsensus { targets: Vec<PlayerId> },
+    /// The pack's target is locked and the witch must act before the night can finish.
+    AwaitingWitch,
+}
+
+/// The witch's decision for one night; she may use at most one potion.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WitchChoice {
+    /// Spend the heal potion on the werewolves' target.
+    Heal,
+    /// Spend the poison potion on a living player other than herself.
+    Poison(PlayerId),
+    /// Keep both potions.
+    Pass,
 }
 
 /// A private seer result, retained for moderator inspection and reconnecting players.
@@ -76,11 +92,19 @@ pub struct Engine {
     /// Living voter -> the player they voted for this day.
     day_votes: BTreeMap<PlayerId, PlayerId>,
     pending_hunter: Option<(PlayerId, Phase)>,
+    /// The pack's locked target while the witch takes her turn.
+    attack: Option<PlayerId>,
+    witch_choice: Option<WitchChoice>,
+    heal_used: bool,
+    poison_used: bool,
 }
 
 impl Engine {
     /// The fewest players a game can be built with.
     pub const MIN_PLAYERS: usize = 5;
+
+    /// The village roles a deal draws from; a roster holds at most one of each.
+    pub const SPECIAL_ROLES: [Role; 4] = [Role::Doctor, Role::Seer, Role::Hunter, Role::Witch];
 
     /// Deal `max(1, player_count / 3)` wolves and up to `max(2, floor(village_count * 33%))` distinct special village roles.
     pub fn new(player_count: usize) -> Result<Self, GameError> {
@@ -99,7 +123,7 @@ impl Engine {
         let wolves = (player_count / 3).max(1);
         let villagers = player_count - wolves;
         let mut rng = SplitMix64::new(seed);
-        let mut special_roles = [Role::Doctor, Role::Seer, Role::Hunter];
+        let mut special_roles = Self::SPECIAL_ROLES;
         let special_count = (villagers * 33 / 100).max(2).min(special_roles.len());
         rng.shuffle(&mut special_roles);
         let mut roles = Vec::with_capacity(player_count);
@@ -132,10 +156,10 @@ impl Engine {
                 "werewolves start at or above parity with villagers",
             ));
         }
-        for role in [Role::Doctor, Role::Seer, Role::Hunter] {
+        for role in Self::SPECIAL_ROLES {
             if roles.iter().filter(|r| **r == role).count() > 1 {
                 return Err(GameError::InvalidRoster(
-                    "at most one doctor, one seer, and one hunter are allowed",
+                    "at most one doctor, one seer, one hunter, and one witch are allowed",
                 ));
             }
         }
@@ -159,12 +183,16 @@ impl Engine {
             inspections: Vec::new(),
             day_votes: BTreeMap::new(),
             pending_hunter: None,
+            attack: None,
+            witch_choice: None,
+            heal_used: false,
+            poison_used: false,
         }
     }
 
     // ----- commands -------------------------------------------------------
 
-    /// Record one werewolf naming `target` for tonight's kill; a wolf may overwrite their pick freely until the night resolves.
+    /// Record one werewolf naming `target` for tonight's kill; a wolf may overwrite their pick until the pack's target is locked.
     pub fn night_action(&mut self, wolf: PlayerId, target: PlayerId) -> Result<(), GameError> {
         self.ensure_phase(Phase::Night)?;
 
@@ -173,6 +201,9 @@ impl Engine {
             return Err(GameError::NotAWerewolf(wolf));
         }
         self.require_alive(target)?;
+        if self.attack.is_some() {
+            return Err(GameError::AlreadyActed(wolf));
+        }
 
         if wolf == target && self.alive_count_by_role().1 == 1 {
             return Err(GameError::LastWolfCannotTargetSelf);
@@ -224,42 +255,92 @@ impl Engine {
         Ok(inspection)
     }
 
-    /// Resolve the night: eliminate the wolves' agreed target, check for a win, advance to [`Phase::Day`] or [`Phase::Ended`].
+    /// The witch's turn once the pack's target is locked: heal it, poison someone else, or pass; the choice is final.
+    pub fn witch_action(&mut self, witch: PlayerId, choice: WitchChoice) -> Result<(), GameError> {
+        self.ensure_phase(Phase::Night)?;
+        if self.require_alive(witch)?.role() != Role::Witch {
+            return Err(GameError::NotAWitch(witch));
+        }
+        if self.witch_choice.is_some() {
+            return Err(GameError::AlreadyActed(witch));
+        }
+        if self.attack.is_none() {
+            return Err(GameError::PackUndecided);
+        }
+        match choice {
+            WitchChoice::Heal => {
+                if self.heal_used {
+                    return Err(GameError::PotionSpent(witch));
+                }
+                self.heal_used = true;
+            }
+            WitchChoice::Poison(target) => {
+                self.require_alive(target)?;
+                if target == witch {
+                    return Err(GameError::WitchCannotPoisonSelf);
+                }
+                if self.poison_used {
+                    return Err(GameError::PotionSpent(witch));
+                }
+                self.poison_used = true;
+            }
+            WitchChoice::Pass => {}
+        }
+        self.witch_choice = Some(choice);
+        Ok(())
+    }
+
+    /// Resolve the night: lock the pack's target, wait for a witch who still holds a potion, then apply deaths and advance.
     pub fn resolve_night(&mut self) -> Result<NightOutcome, GameError> {
         self.ensure_phase(Phase::Night)?;
 
-        let living_wolves = self.living_ids_where(|p| p.role() == Role::Werewolf);
         let waiting_on = self.pending_actors();
         if !waiting_on.is_empty() {
             return Err(GameError::ActionsIncomplete { waiting_on });
         }
 
-        let targets: BTreeSet<PlayerId> = living_wolves
-            .iter()
-            .map(|id| self.night_picks[id])
-            .collect();
-        if targets.len() != 1 {
-            // A split pack is not an error: wipe the board and let them pick again.
-            self.night_picks.clear();
-            return Ok(NightOutcome::NoConsensus {
-                targets: targets.into_iter().collect(),
-            });
-        }
-        let target = targets.into_iter().next().expect("exactly one target");
+        let target = match self.attack {
+            Some(target) => target,
+            None => {
+                let targets: BTreeSet<PlayerId> = self
+                    .living_ids_where(|p| p.role() == Role::Werewolf)
+                    .iter()
+                    .map(|id| self.night_picks[id])
+                    .collect();
+                if targets.len() != 1 {
+                    // A split pack is not an error: wipe the board and let them pick again.
+                    self.night_picks.clear();
+                    return Ok(NightOutcome::NoConsensus {
+                        targets: targets.into_iter().collect(),
+                    });
+                }
+                let target = targets.into_iter().next().expect("exactly one target");
+                if self.witch_can_act() {
+                    self.attack = Some(target);
+                    return Ok(NightOutcome::AwaitingWitch);
+                }
+                target
+            }
+        };
 
-        let saved = self.doctor_picks.values().any(|&pick| pick == target);
+        let choice = self.witch_choice.take();
+        let protected = self.doctor_picks.values().any(|&pick| pick == target);
+        let mut deaths = BTreeSet::new();
+        if !protected && choice != Some(WitchChoice::Heal) {
+            deaths.insert(target);
+        }
+        if let Some(WitchChoice::Poison(poisoned)) = choice {
+            deaths.insert(poisoned);
+        }
+        let deaths: Vec<PlayerId> = deaths.into_iter().collect();
+        self.attack = None;
         self.night_picks.clear();
         self.doctor_picks.clear();
         self.seer_picks.clear();
-        if saved {
-            self.resume(Phase::Day);
-        } else {
-            self.eliminate(target, Phase::Day);
-        }
-        Ok(if saved {
-            NightOutcome::Saved(target)
-        } else {
-            NightOutcome::Killed(target)
+        self.eliminate(&deaths, Phase::Day);
+        Ok(NightOutcome::Dawn {
+            saved: (!deaths.contains(&target)).then_some(target),
+            deaths,
         })
     }
 
@@ -297,7 +378,7 @@ impl Engine {
         self.day_votes.clear();
         self.seer_picks.clear();
         if let Some(target) = target {
-            self.eliminate(target, Phase::Night);
+            self.eliminate(&[target], Phase::Night);
             Ok(DayOutcome::Eliminated(target))
         } else {
             self.resume(Phase::Night);
@@ -370,13 +451,15 @@ impl Engine {
             .ok_or(GameError::UnknownPlayer(id))
     }
 
-    /// `(living village team including doctor and seer, living werewolves)`.
+    /// `(living village team including every special role, living werewolves)`.
     pub fn alive_count_by_role(&self) -> (usize, usize) {
         let mut villagers = 0;
         let mut wolves = 0;
         for p in self.alive() {
             match p.role() {
-                Role::Villager | Role::Doctor | Role::Seer | Role::Hunter => villagers += 1,
+                Role::Villager | Role::Doctor | Role::Seer | Role::Hunter | Role::Witch => {
+                    villagers += 1
+                }
                 Role::Werewolf => wolves += 1,
             }
         }
@@ -386,15 +469,15 @@ impl Engine {
     /// Actors still needed in the current phase, or nobody after ending.
     pub fn pending_actors(&self) -> Vec<PlayerId> {
         match self.phase {
-            Phase::Night => self
-                .living_ids_where(|p| match p.role() {
-                    Role::Werewolf => !self.night_picks.contains_key(&p.id()),
-                    Role::Doctor => !self.doctor_picks.contains_key(&p.id()),
-                    Role::Seer => !self.seer_picks.contains_key(&p.id()),
-                    Role::Villager | Role::Hunter => false,
-                })
-                .into_iter()
-                .collect(),
+            Phase::Night if self.attack.is_some() => {
+                self.living_ids_where(|p| p.role() == Role::Witch && self.witch_choice.is_none())
+            }
+            Phase::Night => self.living_ids_where(|p| match p.role() {
+                Role::Werewolf => !self.night_picks.contains_key(&p.id()),
+                Role::Doctor => !self.doctor_picks.contains_key(&p.id()),
+                Role::Seer => !self.seer_picks.contains_key(&p.id()),
+                Role::Villager | Role::Hunter | Role::Witch => false,
+            }),
             Phase::Day => self
                 .living_ids_where(|_| true)
                 .into_iter()
@@ -454,6 +537,22 @@ impl Engine {
         self.doctor_picks.clone()
     }
 
+    /// Whether the witch's heal potion is still unused.
+    pub fn heal_available(&self) -> bool {
+        !self.heal_used
+    }
+
+    /// Whether the witch's poison potion is still unused.
+    pub fn poison_available(&self) -> bool {
+        !self.poison_used
+    }
+
+    /// The pack's target, shown only to a witch on her pending turn while she still holds the heal potion.
+    pub fn witch_victim(&self) -> Option<PlayerId> {
+        self.attack
+            .filter(|_| self.witch_choice.is_none() && !self.heal_used)
+    }
+
     /// All private seer results; adapters must only disclose each result to its seer.
     pub fn inspections(&self) -> &[Inspection] {
         &self.inspections
@@ -461,14 +560,25 @@ impl Engine {
 
     // ----- internals --------------------------------------------------------
 
-    fn eliminate(&mut self, target: PlayerId, next: Phase) {
-        self.players[target.index()].kill();
-        if self.players[target.index()].role() == Role::Hunter {
-            self.pending_hunter = Some((target, next));
+    /// Kill every target at once; a hunter among them shoots before play resumes at `next`.
+    fn eliminate(&mut self, targets: &[PlayerId], next: Phase) {
+        for target in targets {
+            self.players[target.index()].kill();
+        }
+        let hunter = targets
+            .iter()
+            .find(|id| self.players[id.index()].role() == Role::Hunter);
+        if let Some(&hunter) = hunter {
+            self.pending_hunter = Some((hunter, next));
             self.phase = Phase::Hunter;
         } else {
             self.resume(next);
         }
+    }
+
+    /// A living witch takes a turn only while she still holds a potion.
+    fn witch_can_act(&self) -> bool {
+        !(self.heal_used && self.poison_used) && self.alive().any(|p| p.role() == Role::Witch)
     }
 
     fn resume(&mut self, next: Phase) {

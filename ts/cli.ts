@@ -154,8 +154,7 @@ export class LineReader {
 // ----- the run ------------------------------------------------------------
 
 export class Table {
-  private nightVictim: number | null = null;
-  private nightSaved: number | null = null;
+  private dawn: { saved: number | null; deaths: number[] } | null = null;
 
   constructor(
     private game: Game,
@@ -210,6 +209,48 @@ export class Table {
     }
   }
 
+  // Ask the human for one of `words`, accepting any unambiguous prefix.
+  private async promptWord<T extends string>(question: string, words: T[]): Promise<T | null> {
+    console.log(question);
+    console.log(`  ${words.join("   ")}`);
+    for (;;) {
+      process.stdout.write("> ");
+      const input = await this.reader.next();
+      if (input === null || input === undefined) return null;
+      if (input === "") continue;
+      const hits = words.filter((word) => word.startsWith(input.toLowerCase()));
+      if (hits.length === 1) return hits[0]!;
+      console.log("  not a valid choice — type one of the words from the list");
+    }
+  }
+
+  // The human witch's turn; a bot witch is handled with the other bot night actions.
+  private async runWitch(): Promise<boolean> {
+    const state = this.state();
+    if (!state.pendingActors.includes(this.me)) return true;
+    const victim = state.witchVictim;
+    console.log(
+      victim === undefined
+        ? "Witch, your healing potion is spent, so you are not told who was attacked."
+        : `Witch, the Werewolves attacked ${victim === this.me ? "you" : nameOf(victim)}.`,
+    );
+    const words: ("heal" | "poison" | "nothing")[] = [];
+    if (victim !== undefined) words.push("heal");
+    if (state.poisonAvailable) words.push("poison");
+    words.push("nothing");
+    const word = await this.promptWord("Use one potion, or do nothing?", words);
+    if (word === null) return false;
+    if (word === "heal") this.game.witchHeal(this.me);
+    else if (word === "nothing") this.game.witchPass(this.me);
+    else {
+      const others = livingIds(state).filter((id) => id !== this.me);
+      const target = await this.promptPlayer("Who do you poison?", others);
+      if (target === null) return false;
+      this.game.witchPoison(this.me, target);
+    }
+    return true;
+  }
+
   private async waitForEnter(): Promise<void> {
     process.stdout.write("[Enter] ");
     await this.reader.next();
@@ -219,7 +260,7 @@ export class Table {
     banner(title, this.state(), this.reveal);
   }
 
-  // One night: the pack names a victim and it is resolved.
+  // One night: the night roles act, then the witch, and it is resolved.
   private async runNight(): Promise<boolean> {
     this.drawBanner(`Night ${this.state().round}`);
 
@@ -252,10 +293,13 @@ export class Table {
     for (;;) {
       botNightActions(this.game, this.rng, this.isBot);
       const outcome = this.game.resolveNight();
-      if (outcome.kind !== "NoConsensus") {
-        this.nightVictim = outcome.kind === "Killed" ? outcome.killed : null;
-        this.nightSaved = outcome.kind === "Saved" ? outcome.saved : null;
+      if (outcome.kind === "Dawn") {
+        this.dawn = outcome;
         break;
+      }
+      if (outcome.kind === "AwaitingWitch") {
+        if (!(await this.runWitch())) return false;
+        continue;
       }
       // The pack is always unanimous, so this is only a safety net.
       console.log("The pack split and nobody died. They pick again.");
@@ -276,17 +320,14 @@ export class Table {
         ? "The game begins. Discuss who you suspect before voting."
         : "Sun rises, everyone wake up!",
     );
-    if (this.nightVictim !== null) {
-      const victim = this.nightVictim;
-      this.nightVictim = null;
+    const dawn = this.dawn;
+    this.dawn = null;
+    if (dawn?.saved != null)
+      console.log(`The Werewolves attacked ${nameOf(dawn.saved)}, but they were saved!`);
+    for (const victim of dawn?.deaths ?? []) {
       console.log(
-        `Sadly, ${nameOf(victim)} was eliminated by the Werewolves! (${roleTag(this.game.roleOf(victim))})`,
+        `Sadly, ${nameOf(victim)} was eliminated during the night! (${roleTag(this.game.roleOf(victim))})`,
       );
-    } else if (this.nightSaved !== null) {
-      console.log(`The Werewolves attacked ${nameOf(this.nightSaved)}, but the Doctor saved them!`);
-      this.nightSaved = null;
-    } else if (this.state().round > 1) {
-      console.log("Everyone is still here — no one was eliminated in the night.");
     }
 
     const alive = livingIds(this.state()).map(nameOf);

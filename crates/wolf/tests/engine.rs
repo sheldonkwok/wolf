@@ -88,7 +88,10 @@ fn play_out(g: &mut Engine, rng: &mut Rng, unanimous_town: bool) {
                 }
                 assert_eq!(
                     g.resolve_night().expect("night resolves"),
-                    NightOutcome::Killed(victim),
+                    NightOutcome::Dawn {
+                        saved: None,
+                        deaths: vec![victim],
+                    },
                     "a unanimous pack never splits",
                 );
             }

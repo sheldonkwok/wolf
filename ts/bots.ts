@@ -78,6 +78,14 @@ export function botDayVotes(
   }
 }
 
+// A bot witch heals the victim she is shown half the time, otherwise occasionally poisons a random other player.
+export function botWitchAction(game: Game, state: GameState, rng: Rng, witch: number): void {
+  if (state.witchVictim !== undefined && rng.chance(50)) game.witchHeal(witch);
+  else if (state.poisonAvailable && rng.chance(25))
+    game.witchPoison(witch, randomLivingOther(state, rng, witch));
+  else game.witchPass(witch);
+}
+
 // Submit every pending bot night action; bot wolves follow an existing pack pick before choosing their own.
 export function botNightActions(game: Game, rng: Rng, isBot: (seat: number) => boolean): void {
   const state = game.state();
@@ -90,6 +98,9 @@ export function botNightActions(game: Game, rng: Rng, isBot: (seat: number) => b
         break;
       case "Seer":
         game.seerAction(seat, randomLivingOther(state, rng, seat));
+        break;
+      case "Witch":
+        botWitchAction(game, state, rng, seat);
         break;
       default:
         game.nightAction(seat, target);

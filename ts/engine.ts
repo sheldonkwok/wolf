@@ -28,6 +28,10 @@ const GAME_ERROR_CODES: Record<NativeGameErrorCode, true> = {
   NotAWerewolf: true,
   NotADoctor: true,
   NotASeer: true,
+  NotAWitch: true,
+  PackUndecided: true,
+  PotionSpent: true,
+  WitchCannotPoisonSelf: true,
   NotPendingHunter: true,
   LastWolfCannotTargetSelf: true,
   WrongPhase: true,
@@ -71,10 +75,11 @@ function attempt<T>(call: () => T): T {
   }
 }
 
+// `saved` is the attacked player if they lived; `deaths` are in seat order and carry no cause.
 export type NightResolution =
-  | { kind: "Killed"; killed: number }
-  | { kind: "Saved"; saved: number }
-  | { kind: "NoConsensus"; targets: number[] };
+  | { kind: "Dawn"; saved: number | null; deaths: number[] }
+  | { kind: "NoConsensus"; targets: number[] }
+  | { kind: "AwaitingWitch" };
 
 export type DayResolution = { kind: "Eliminated"; eliminated: number } | { kind: "Tied" };
 
@@ -82,14 +87,20 @@ function isSeat(value: unknown): value is number {
   return typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
 }
 
+function isSeats(value: unknown): value is number[] {
+  return Array.isArray(value) && value.every(isSeat);
+}
+
 function normalizeNight(result: NightResult): NightResolution {
-  if (result?.kind === "Killed" && isSeat(result.killed)) {
-    return { kind: "Killed", killed: result.killed };
+  if (result?.kind === "AwaitingWitch") return { kind: "AwaitingWitch" };
+  if (result?.kind === "Dawn" && isSeats(result.deaths) && (result.saved == null || isSeat(result.saved))) {
+    const saved = result.saved ?? null;
+    // The engine never reports nobody attacked, nor a saved player among the dead.
+    if ((saved !== null || result.deaths.length > 0) && !result.deaths.includes(saved as number)) {
+      return { kind: "Dawn", saved, deaths: result.deaths };
+    }
   }
-  if (result?.kind === "Saved" && isSeat(result.saved)) {
-    return { kind: "Saved", saved: result.saved };
-  }
-  if (result?.kind === "NoConsensus" && Array.isArray(result.targets) && result.targets.every(isSeat)) {
+  if (result?.kind === "NoConsensus" && isSeats(result.targets)) {
     return { kind: "NoConsensus", targets: result.targets };
   }
   throw new GameError("Unknown", "Invalid night resolution from native addon");
@@ -135,6 +146,18 @@ export class Game {
 
   seerAction(seer: number, target: number): InspectionView {
     return attempt(() => this.inner.seerAction(seer, target));
+  }
+
+  witchHeal(witch: number): void {
+    attempt(() => this.inner.witchHeal(witch));
+  }
+
+  witchPoison(witch: number, target: number): void {
+    attempt(() => this.inner.witchPoison(witch, target));
+  }
+
+  witchPass(witch: number): void {
+    attempt(() => this.inner.witchPass(witch));
   }
 
   hunterAction(hunter: number, target: number): void {

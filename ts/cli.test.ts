@@ -198,3 +198,171 @@ describe("CLI Day 1 inspection", () => {
     expect(session.game.state().inspections).toEqual([]);
   });
 });
+
+// A table at Night 1 with everyone alive; `draws` and `chances` script the bots.
+function night(roles: Role[], draws: number[], chances: boolean[] = []) {
+  const source = input();
+  const game = Game.withRoles(roles);
+  const tieDay = () => {
+    const living = game
+      .state()
+      .players.filter((p) => p.alive)
+      .map((p) => p.id);
+    for (const [index, voter] of living.entries()) game.vote(voter, living[(index + 1) % living.length]!);
+    game.resolveDay();
+  };
+  tieDay();
+  const rng = new Rng(42n);
+  const log = spyOn(console, "log").mockImplementation(() => {});
+  spies.push(
+    log,
+    spyOn(process.stdout, "write").mockImplementation(() => true),
+    spyOn(rng, "chance").mockImplementation(() => {
+      const chance = chances.shift();
+      if (chance === undefined) throw new Error("Unexpected bot RNG chance");
+      return chance;
+    }),
+    spyOn(rng, "below").mockImplementation((limit) => {
+      const draw = draws.shift();
+      if (draw === undefined || draw >= limit) throw new Error("Unexpected bot RNG draw");
+      return draw;
+    }),
+  );
+  const table = new Table(game, rng, 0, false, source.reader);
+  return {
+    ...source,
+    game,
+    draws,
+    tieDay,
+    output: () => log.mock.calls.flat().join("\n"),
+    // biome-ignore lint/complexity/useLiteralKeys: Exercise this phase without running the entire interactive game.
+    runNight: () => table["runNight"](),
+    // biome-ignore lint/complexity/useLiteralKeys: Exercise this phase without running the entire interactive game.
+    runDay: () => table["runDay"](),
+  };
+}
+
+describe("CLI Witch", () => {
+  const HUMAN: Role[] = ["Witch", "Werewolf", "Villager", "Villager", "Villager", "Villager", "Villager"];
+  const BOT: Role[] = ["Villager", "Werewolf", "Witch", "Villager", "Villager", "Villager", "Villager"];
+
+  test("a human Witch sees the victim, heals, and is blind on later nights", async () => {
+    const session = night(HUMAN, [1]);
+    session.send("heal\n");
+    expect(await session.runNight()).toBe(true);
+    expect(session.game.state()).toMatchObject({ phase: "Day", round: 2, healAvailable: false });
+    expect(session.game.state().players.every((p) => p.alive)).toBe(true);
+    expect(session.output()).toContain("Witch, the Werewolves attacked Cass.");
+    expect(session.output()).toContain("  heal   poison   nothing");
+
+    session.tieDay();
+    session.draws.push(1);
+    session.send("h\nn\n");
+    expect(await session.runNight()).toBe(true);
+    expect(session.output()).toContain(
+      "Witch, your healing potion is spent, so you are not told who was attacked.",
+    );
+    expect(session.output()).toContain("  poison   nothing");
+    expect(session.output()).toContain("not a valid choice — type one of the words from the list");
+    expect(session.game.isAlive(2)).toBe(false);
+    expect(session.game.state()).toMatchObject({ phase: "Day", round: 3, poisonAvailable: true });
+    session.close();
+  });
+
+  test("the morning after a heal reports a save without naming the saver", async () => {
+    const session = night(HUMAN, [1]);
+    session.send("heal\n");
+    session.close();
+    expect(await session.runNight()).toBe(true);
+    expect(await session.runDay()).toBe(false);
+    expect(session.output()).toContain("The Werewolves attacked Cass, but they were saved!");
+    expect(session.output()).not.toMatch(/Sadly|Doctor|Witch saved/);
+  });
+
+  test("a human Witch retries bad input, poisons, and the morning reports both deaths", async () => {
+    const session = night(HUMAN, [1]);
+    session.send("x\n\np\nzz\n0\n3\n");
+    session.close();
+    expect(await session.runNight()).toBe(true);
+    expect(session.game.state()).toMatchObject({ phase: "Day", round: 2, healAvailable: true });
+    expect(session.game.state().poisonAvailable).toBe(false);
+    expect(
+      session.game
+        .state()
+        .players.filter((p) => !p.alive)
+        .map((p) => p.id),
+    ).toEqual([2, 3]);
+    expect(session.output()).toContain("Who do you poison?");
+    expect(session.output().match(/not a valid choice/g)).toHaveLength(3);
+    expect(await session.runDay()).toBe(false);
+    expect(session.output()).toContain("Sadly, Cass was eliminated during the night! (Villager)");
+    expect(session.output()).toContain("Sadly, Dev was eliminated during the night! (Villager)");
+    expect(session.output()).not.toContain("saved");
+  });
+
+  test("an attacked human Witch is told so and may let the attack land", async () => {
+    const session = night(HUMAN, [0]);
+    session.send("nothing\n");
+    session.close();
+    expect(await session.runNight()).toBe(true);
+    expect(session.output()).toContain("Witch, the Werewolves attacked you.");
+    expect(session.game.isAlive(0)).toBe(false);
+    expect(session.game.state()).toMatchObject({ healAvailable: true, poisonAvailable: true });
+  });
+
+  test.each([
+    ["", "the potion prompt"],
+    ["poison\n", "the poison target"],
+  ])("EOF after %j leaves the night waiting at %s", async (typed) => {
+    const session = night(HUMAN, [1]);
+    session.send(typed);
+    session.close();
+    expect(await session.runNight()).toBe(false);
+    expect(session.game.state()).toMatchObject({
+      phase: "Night",
+      round: 1,
+      pendingActors: [0],
+      witchVictim: 2,
+      healAvailable: true,
+      poisonAvailable: true,
+    });
+    expect(session.game.state().players.every((p) => p.alive)).toBe(true);
+  });
+
+  const botTurns: {
+    name: string;
+    draws: number[];
+    chances: boolean[];
+    dead: number[];
+    heal: boolean;
+    poison: boolean;
+  }[] = [
+    { name: "heals", draws: [3], chances: [true], dead: [], heal: false, poison: true },
+    { name: "passes", draws: [3], chances: [false, false], dead: [4], heal: true, poison: true },
+    { name: "poisons", draws: [3, 4], chances: [false, true], dead: [4, 5], heal: true, poison: false },
+  ];
+  test.each(botTurns)(
+    "a bot Witch $name without prompting the human",
+    async ({ draws, chances, dead, heal, poison }) => {
+      const session = night(BOT, draws, chances);
+      session.close();
+      expect(await session.runNight()).toBe(true);
+      expect(session.reads).not.toHaveBeenCalled();
+      expect(session.output()).not.toMatch(/Witch|potion|attacked/);
+      expect(session.game.state()).toMatchObject({
+        phase: "Day",
+        round: 2,
+        healAvailable: heal,
+        poisonAvailable: poison,
+      });
+      expect(
+        session.game
+          .state()
+          .players.filter((p) => !p.alive)
+          .map((p) => p.id),
+      ).toEqual(dead);
+      expect(draws).toEqual([]);
+      expect(chances).toEqual([]);
+    },
+  );
+});

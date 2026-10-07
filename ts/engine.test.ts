@@ -16,7 +16,7 @@ function reachNight(game: Game): void {
 }
 
 test("withSeed is reproducible and matches the Rust deal", () => {
-  // Seed 100 / 7 players deals the wolves to seats 0 and 6.
+  // Seed 100 / 7 players deals the wolves to seats 2 and 4 and the Seer to seat 5.
   const a = Game.withSeed(7, 100n).state();
   const b = Game.withSeed(7, 100n).state();
   expect(a).toEqual(b);
@@ -26,8 +26,10 @@ test("withSeed is reproducible and matches the Rust deal", () => {
   expect(a.majorityRequired).toBe(4);
   expect(a.majorityTarget).toBeUndefined();
   expect(a.pendingActors).toEqual([0, 1, 2, 3, 4, 5, 6]);
-  expect(a.pendingInspectors).toEqual([2]);
-  expect(a.players.filter((p) => p.role === "Werewolf").map((p) => p.id)).toEqual([0, 6]);
+  expect(a.pendingInspectors).toEqual([5]);
+  expect(a.players.filter((p) => p.role === "Werewolf").map((p) => p.id)).toEqual([2, 4]);
+  expect(a).toMatchObject({ healAvailable: true, poisonAvailable: true });
+  expect(a.witchVictim).toBeUndefined();
 });
 
 test("Rng stream matches SplitMix64(100)", () => {
@@ -79,7 +81,7 @@ test("a lone wolf cannot target itself and a rejected pick leaves state unchange
   expect(grab(() => game.nightAction(0, 0)).code).toBe("LastWolfCannotTargetSelf");
   expect(game.state()).toEqual(before);
   game.nightAction(0, 1);
-  expect(game.resolveNight()).toEqual({ kind: "Killed", killed: 1 });
+  expect(game.resolveNight()).toEqual({ kind: "Dawn", saved: null, deaths: [1] });
 });
 
 test("majority crosses the binding and votes clear after resolution", () => {
@@ -191,7 +193,7 @@ test("night resolution preserves seat zero", () => {
   const game = Game.withRoles(["Villager", "Werewolf", "Villager", "Villager", "Villager"]);
   reachNight(game);
   game.nightAction(1, 0);
-  expect(game.resolveNight()).toEqual({ kind: "Killed", killed: 0 });
+  expect(game.resolveNight()).toEqual({ kind: "Dawn", saved: null, deaths: [0] });
 });
 
 test("error conversion validates tags and preserves typed errors", () => {
@@ -218,12 +220,16 @@ const malformedResults: Array<["resolveDay" | "resolveNight", unknown]> = [
   ["resolveDay", { kind: "Tied", eliminated: 0 }],
   ["resolveDay", { kind: "Tied", eliminated: "0" }],
   ["resolveDay", null],
-  ["resolveNight", { kind: "Killed", targets: [] }],
-  ["resolveNight", { kind: "Killed", killed: "0", targets: [] }],
-  ["resolveNight", { kind: "Killed", killed: NaN, targets: [] }],
-  ["resolveNight", { kind: "Killed", killed: Number.MAX_SAFE_INTEGER + 1, targets: [] }],
-  ["resolveNight", { kind: "Saved" }],
-  ["resolveNight", { kind: "Saved", saved: -1 }],
+  ["resolveNight", { kind: "Dawn", targets: [] }],
+  ["resolveNight", { kind: "Dawn", deaths: [] }],
+  ["resolveNight", { kind: "Dawn", deaths: ["0"] }],
+  ["resolveNight", { kind: "Dawn", deaths: [NaN] }],
+  ["resolveNight", { kind: "Dawn", deaths: [Number.MAX_SAFE_INTEGER + 1] }],
+  ["resolveNight", { kind: "Dawn", saved: -1, deaths: [] }],
+  ["resolveNight", { kind: "Dawn", saved: 1.5, deaths: [2] }],
+  ["resolveNight", { kind: "Dawn", saved: 2, deaths: [1, 2] }],
+  ["resolveNight", { kind: "Killed", killed: 0, targets: [] }],
+  ["resolveNight", { kind: "Saved", saved: 0 }],
   ["resolveNight", { kind: "NoConsensus" }],
   ["resolveNight", { kind: "NoConsensus", targets: [1, "2"] }],
   ["resolveNight", { kind: "Unexpected", targets: [] }],
@@ -258,7 +264,7 @@ test("Hunter actions and validation cross the binding, including seat zero", () 
   const game = Game.withRoles(["Hunter", "Werewolf", "Villager", "Villager", "Villager"]);
   reachNight(game);
   game.nightAction(1, 0);
-  expect(game.resolveNight()).toEqual({ kind: "Killed", killed: 0 });
+  expect(game.resolveNight()).toEqual({ kind: "Dawn", saved: null, deaths: [0] });
   expect(game.state().phase).toBe("Hunter");
   expect(game.state().pendingActors).toEqual([0]);
   expect(game.state().isOver).toBe(false);
@@ -338,8 +344,109 @@ test("special roles cross the binding with final actions, private results, and a
   ]);
   expect(grab(() => game.seerAction(2, 3)).code).toBe("AlreadyActed");
   expect(grab(() => game.doctorAction(0, 3)).code).toBe("AlreadyActed");
-  expect(game.resolveNight()).toEqual({ kind: "Saved", saved: 0 });
+  expect(game.resolveNight()).toEqual({ kind: "Dawn", saved: 0, deaths: [] });
   expect(game.state().doctorPicks).toEqual([]);
   expect(game.state().players.filter((p) => p.alive).length).toBe(4);
   expect(game.state().round).toBe(2);
+});
+
+test("the Witch's turn, potions, and errors cross the binding, including an attacked seat zero", () => {
+  const game = Game.withRoles(["Witch", "Werewolf", "Doctor", "Hunter", "Villager", "Villager", "Villager"]);
+  reachNight(game);
+  expect(game.state()).toMatchObject({ pendingActors: [1, 2], healAvailable: true, poisonAvailable: true });
+  expect(game.state().witchVictim).toBeUndefined();
+  const early = game.state();
+  expect(grab(() => game.witchPass(0)).code).toBe("PackUndecided");
+  expect(grab(() => game.witchHeal(0)).code).toBe("PackUndecided");
+  expect(grab(() => game.witchPoison(0, 1)).code).toBe("PackUndecided");
+  expect(grab(() => game.witchHeal(1)).code).toBe("NotAWitch");
+  expect(game.state()).toEqual(early);
+
+  game.nightAction(1, 0);
+  game.doctorAction(2, 4);
+  expect(game.resolveNight()).toEqual({ kind: "AwaitingWitch" });
+  const locked = game.state();
+  expect(locked).toMatchObject({ phase: "Night", round: 1, pendingActors: [0], witchVictim: 0 });
+  expect(locked.players.every((p) => p.alive || p.id === 6)).toBe(true);
+  expect(grab(() => game.resolveNight()).code).toBe("ActionsIncomplete");
+  expect(grab(() => game.nightAction(1, 4)).code).toBe("AlreadyActed");
+  expect(grab(() => game.doctorAction(2, 0)).code).toBe("AlreadyActed");
+  expect(grab(() => game.witchPoison(0, 0)).code).toBe("WitchCannotPoisonSelf");
+  expect(grab(() => game.witchPoison(0, 6)).code).toBe("PlayerNotAlive");
+  expect(grab(() => game.witchPoison(0, 99)).code).toBe("UnknownPlayer");
+  expect(grab(() => game.witchPass(2)).code).toBe("NotAWitch");
+  expect(game.state()).toEqual(locked);
+
+  game.witchHeal(0);
+  expect(game.state()).toMatchObject({ pendingActors: [], healAvailable: false, poisonAvailable: true });
+  expect(game.state().witchVictim).toBeUndefined();
+  expect(grab(() => game.witchPass(0)).code).toBe("AlreadyActed");
+  expect(game.resolveNight()).toEqual({ kind: "Dawn", saved: 0, deaths: [] });
+  expect(game.state()).toMatchObject({ phase: "Day", round: 2 });
+  expect(grab(() => game.witchPass(0)).code).toBe("WrongPhase");
+
+  // Night 2: the heal is spent, so she is blind, and her poison adds a second death.
+  for (const player of game.state().players.filter((p) => p.alive)) game.vote(player.id, 5);
+  game.resolveDay();
+  game.nightAction(1, 4);
+  game.doctorAction(2, 2);
+  expect(game.resolveNight()).toEqual({ kind: "AwaitingWitch" });
+  expect(game.state().pendingActors).toEqual([0]);
+  expect(game.state().witchVictim).toBeUndefined();
+  const blind = game.state();
+  const spent = grab(() => game.witchHeal(0));
+  expect(spent.code).toBe("PotionSpent");
+  expect(spent.message).toBe("player P0 has already used that potion");
+  expect(game.state()).toEqual(blind);
+  game.witchPoison(0, 3);
+  expect(game.resolveNight()).toEqual({ kind: "Dawn", saved: null, deaths: [3, 4] });
+  expect(game.state()).toMatchObject({
+    phase: "Hunter",
+    round: 2,
+    pendingActors: [3],
+    healAvailable: false,
+    poisonAvailable: false,
+    isOver: false,
+  });
+  game.hunterAction(3, 1);
+  expect(game.state().winner).toBe("Villagers");
+  expect(grab(() => game.witchPass(0)).code).toBe("GameOver");
+});
+
+// Every living player votes for the next one, so the ballot ties and night begins.
+function tieDay(game: Game): void {
+  const living = game
+    .state()
+    .players.filter((p) => p.alive)
+    .map((p) => p.id);
+  for (const [index, voter] of living.entries()) game.vote(voter, living[(index + 1) % living.length]!);
+  expect(game.resolveDay()).toEqual({ kind: "Tied" });
+}
+
+test("a Witch with no potions left, or no longer alive, is never awaited", () => {
+  const roles = ["Witch", "Werewolf", "Villager", "Villager", "Villager", "Villager", "Villager"] as const;
+  const spentGame = Game.withRoles([...roles]);
+  reachNight(spentGame);
+  spentGame.nightAction(1, 2);
+  expect(spentGame.resolveNight()).toEqual({ kind: "AwaitingWitch" });
+  spentGame.witchHeal(0);
+  expect(spentGame.resolveNight()).toEqual({ kind: "Dawn", saved: 2, deaths: [] });
+  tieDay(spentGame);
+  spentGame.nightAction(1, 2);
+  expect(spentGame.resolveNight()).toEqual({ kind: "AwaitingWitch" });
+  spentGame.witchPoison(0, 5);
+  expect(spentGame.resolveNight()).toEqual({ kind: "Dawn", saved: null, deaths: [2, 5] });
+  tieDay(spentGame);
+  expect(spentGame.state().pendingActors).toEqual([1]);
+  spentGame.nightAction(1, 3);
+  expect(grab(() => spentGame.witchPass(0)).code).toBe("PackUndecided");
+  expect(spentGame.resolveNight()).toEqual({ kind: "Dawn", saved: null, deaths: [3] });
+
+  const deadGame = Game.withRoles([...roles]);
+  for (const player of deadGame.state().players) deadGame.vote(player.id, 0);
+  expect(deadGame.resolveDay()).toEqual({ kind: "Eliminated", eliminated: 0 });
+  deadGame.nightAction(1, 2);
+  expect(grab(() => deadGame.witchHeal(0)).code).toBe("PlayerNotAlive");
+  expect(deadGame.resolveNight()).toEqual({ kind: "Dawn", saved: null, deaths: [2] });
+  expect(deadGame.state()).toMatchObject({ healAvailable: true, poisonAvailable: true });
 });

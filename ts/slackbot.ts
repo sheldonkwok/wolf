@@ -116,7 +116,13 @@ export function messageBlocks(message: SlackMessage) {
           action_id: `wolf_choice_${index}`,
           placeholder: { type: "plain_text", text: "Choose a player" },
           options: message.choices!.slice(index * 100, index * 100 + 100).map((choice) => ({
-            text: { type: "plain_text", text: Array.from(choice.label).slice(0, 75).join(""), emoji: false },
+            text: {
+              type: "plain_text",
+              text: Array.from(`${choice.prefix ?? ""}${choice.label}`)
+                .slice(0, 75)
+                .join(""),
+              emoji: false,
+            },
             value: choice.value,
           })),
         },

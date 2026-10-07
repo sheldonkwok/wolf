@@ -1,6 +1,6 @@
 # Wolf on Slack
 
-Wolf runs one game in the public `#werewolf` or `#werewolf-test` channel selected by `SLACK_CHANNEL_ID`. Each instance only handles commands in its configured channel. It uses the existing lobby and Rust engine through napi, with Werewolves, Villagers, a Doctor, and a Seer.
+Wolf runs one game in the public `#werewolf` or `#werewolf-test` channel selected by `SLACK_CHANNEL_ID`. Each instance only handles commands in its configured channel. It uses the existing lobby and Rust engine through napi, with Werewolves, Villagers, and the special village roles: Doctor, Seer, Hunter, and Witch.
 
 ## Setup
 
@@ -53,7 +53,7 @@ The repository declares `undici` directly and uses `patchedDependencies` to redi
 
 ## If night seems stuck
 
-Night ends automatically after every living Werewolf, Doctor, and Seer submits an action. Eliminated players and Villagers do not need to act. With one surviving Werewolf, a Doctor, and a Seer, all three must choose before dawn, even if one is the attack target.
+Night ends automatically after every living Werewolf, Doctor, and Seer submits an action, and then a living Witch who still holds a potion chooses to heal, poison, or do nothing. The Witch is only prompted once the others have finished, and the channel is not told the night is waiting on her. Eliminated players, Villagers, and the Hunter do not need to act. With one surviving Werewolf, a Doctor, and a Seer, all three must choose before dawn, even if one is the attack target.
 
 DM `status` to the bot to check your own action. It confirms whether your action is recorded or still needed, and resends dropdowns when you need to choose. Use the current night's dropdowns; older prompts expire. The channel's `@werewolf status` keeps individual night progress private. If the bot does not respond, check its terminal for delivery or connection errors. Keep the process running to preserve the active game.
 
@@ -64,10 +64,10 @@ For solo testing, run `bun run slackbot -- --dev`, then use `@werewolf join` and
 - In your configured `#werewolf` or `#werewolf-test` channel, mention the bot: `@werewolf join`. The first player is host; 5–12 players can join.
 - `@werewolf leave` leaves a waiting lobby; if the host leaves, the next player becomes host.
 - The host uses `@werewolf start`. Everyone receives their role privately. Wolves also learn their pack. Every game has a random 60–120-second opening with everyone alive and no voting, attacks, or protection. If present, the Seer can inspect privately before the deadline; a missed inspection is skipped. Day 1 starts at the deadline regardless of whether a Seer exists or has acted, with no public inspection report. Play proceeds Day 1 → Night 1 → Day 2.
-- At night, wolves choose a player by full name in their DM dropdown. Dev bots use their stored names. Wolves can change a choice until all have chosen. If they disagree, all choose again using new dropdowns.
+- At night, wolves choose a player by full name in their DM dropdown. Dev bots use their stored names. Wolves can change a choice until all have chosen. If they disagree, all choose again using new dropdowns. Once they agree, the target is locked and the Witch, if she still holds a potion, gets her own dropdown: heal the attacked player, poison another player, or do nothing.
 - During the day, any living player votes publicly with `@werewolf vote @player`, mentioning exactly one living player in the game. The bot announces the vote and progress toward a majority. There is no readiness step or DM elimination ballot.
 - Each living player has one vote and can change it by repeating the command with a new target until the day resolves. When more than half of the living players vote for the same target, that player is eliminated immediately. Otherwise, once every living player has voted, the player with the most votes is eliminated; a tie for the most votes eliminates nobody. Night begins unless a Hunter shot is pending or a team has won. Votes reset each day.
-- When night resolves, the channel receives the outcome and the next day’s voting prompt. The host has no special control over voting, and there is no day or night timer.
+- When night resolves, the channel receives the outcome and the next day’s voting prompt. The outcome names a saved player without saying who saved them, and can list two eliminations when the Witch used her poison. The host has no special control over voting, and there is no day or night timer.
 - `@werewolf status` displays the public roster, phase, current day votes, and majority required. DM `status` to recover your role and any outstanding choice dropdowns. `@werewolf help` shows commands privately.
 - The host can use `@werewolf end` in the game channel to cancel an active game at any time, even if eliminated. No winner is declared; the lobby is emptied and old action dropdowns expire. Players must rejoin to play again.
 - After a win, the channel gets the final roles and a new empty lobby opens. Use `@werewolf join` to play again; the first player to join becomes the new host and can use `@werewolf start` once enough players have joined.
@@ -76,7 +76,7 @@ Game commands from other channels are ignored. Night choices, pack membership, a
 
 ## Game stats
 
-Completed Slack games are saved to SQLite using Drizzle and Bun's SQLite driver. `games` stores a UUID, workspace/channel IDs, start/end timestamps, winning team, and dev-mode flag. `game_players` stores every original player's Slack user ID, seat, role, and bot flag, including eliminated players. Doctor, Seer, and Hunter wins belong to the Villagers team, even if the player was eliminated. Dev games are recorded with `dev = 1` but excluded from stats. Cancelled games, interrupted games, and CLI games are not recorded.
+Completed Slack games are saved to SQLite using Drizzle and Bun's SQLite driver. `games` stores a UUID, workspace/channel IDs, start/end timestamps, winning team, and dev-mode flag. `game_players` stores every original player's Slack user ID, seat, role, and bot flag, including eliminated players. Doctor, Seer, Hunter, and Witch wins belong to the Villagers team, even if the player was eliminated. Dev games are recorded with `dev = 1` but excluded from stats. Cancelled games, interrupted games, and CLI games are not recorded.
 
 DM `stats` for your lifetime games played, wins, losses, and win rate, overall and by team. In the configured game channel, use `@werewolf stats` for lifetime village vs. Werewolf win rates and the top 3 players by number of Werewolf assignments (not wins). Stats are scoped to the configured workspace and channel and only include completed non-dev games; bots are excluded from player stats and rankings. Ranking ties are ordered by Slack user ID. With no completed games, win rates show `N/A`.
 

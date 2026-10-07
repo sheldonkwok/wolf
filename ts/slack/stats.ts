@@ -11,7 +11,7 @@ export function personalStats(channel: string, stats: PlayerStats): string {
     `Village team: ${record(stats.village)}`,
     `Werewolf team: ${record(stats.wolves)}`,
     ...(stats.played === 0 ? ["You haven't completed any games yet."] : []),
-    "Completed games only; dev games excluded. Doctor, Seer, and Hunter count as village team. Team wins count even if you were eliminated.",
+    "Completed games only; dev games excluded. Doctor, Seer, Hunter, and Witch count as village team. Team wins count even if you were eliminated.",
   ].join("\n");
 }
 

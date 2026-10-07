@@ -52,6 +52,22 @@ fn town_lynches(g: &mut Engine, target: PlayerId) -> DayOutcome {
     g.resolve_day().expect("day should resolve")
 }
 
+/// A finished night where the pack's target died and nobody else did.
+fn killed(target: PlayerId) -> NightOutcome {
+    NightOutcome::Dawn {
+        saved: None,
+        deaths: vec![target],
+    }
+}
+
+/// A finished night where the pack's target survived and nobody died.
+fn saved(target: PlayerId) -> NightOutcome {
+    NightOutcome::Dawn {
+        saved: Some(target),
+        deaths: Vec::new(),
+    }
+}
+
 fn no_ids() -> Vec<PlayerId> {
     Vec::new()
 }
@@ -143,11 +159,20 @@ fn werewolf_count_scales_with_player_count() {
 
 #[test]
 fn special_village_roles_respect_the_cap_and_are_unique() {
-    for (players, expected) in [(5, 2), (8, 2), (12, 2), (13, 2), (14, 3), (16, 3), (100, 3)] {
+    for (players, expected) in [
+        (5, 2),
+        (8, 2),
+        (12, 2),
+        (13, 2),
+        (14, 3),
+        (18, 3),
+        (19, 4),
+        (100, 4),
+    ] {
         for seed in 0..100 {
             let g = Engine::with_seed(players, seed).unwrap();
             let roles: Vec<_> = g.players().iter().map(|p| p.role()).collect();
-            let special_count = [Role::Doctor, Role::Seer, Role::Hunter]
+            let special_count = Engine::SPECIAL_ROLES
                 .into_iter()
                 .map(|role| {
                     let count = roles.iter().filter(|&&r| r == role).count();
@@ -170,18 +195,12 @@ fn capped_deals_randomly_choose_every_special_role_pair() {
     let mut pairs = BTreeSet::new();
     for seed in 0..100 {
         let g = Engine::with_seed(5, seed).unwrap();
-        let included = [Role::Doctor, Role::Seer, Role::Hunter]
-            .map(|role| g.players().iter().any(|p| p.role() == role));
+        let included =
+            Engine::SPECIAL_ROLES.map(|role| g.players().iter().any(|p| p.role() == role));
+        assert_eq!(included.iter().filter(|&&dealt| dealt).count(), 2);
         pairs.insert(included);
     }
-    assert_eq!(
-        pairs,
-        BTreeSet::from([
-            [true, true, false],
-            [true, false, true],
-            [false, true, true]
-        ])
-    );
+    assert_eq!(pairs.len(), 6, "every pair of the four special roles");
 }
 
 #[test]
@@ -312,7 +331,7 @@ fn a_wolf_may_overwrite_their_night_pick() {
         g.current_night_picks(),
         [(p(0), p(3)), (p(1), p(3))].into_iter().collect()
     );
-    assert_eq!(g.resolve_night().unwrap(), NightOutcome::Killed(p(3)));
+    assert_eq!(g.resolve_night().unwrap(), killed(p(3)));
 }
 
 #[test]
@@ -389,7 +408,7 @@ fn a_split_pack_repicks_instead_of_deadlocking() {
     // They agree the second time around and the kill lands.
     g.night_action(p(0), p(3)).unwrap();
     g.night_action(p(1), p(3)).unwrap();
-    assert_eq!(g.resolve_night().unwrap(), NightOutcome::Killed(p(3)));
+    assert_eq!(g.resolve_night().unwrap(), killed(p(3)));
     assert_eq!(g.phase(), Phase::Day);
 }
 
@@ -410,7 +429,7 @@ fn resolve_night_still_waits_on_a_silent_wolf_before_judging_the_pack() {
 fn a_lone_wolf_never_reports_no_consensus() {
     let mut g = night_game(&[W, V, V, V, V]);
     g.night_action(p(0), p(1)).unwrap();
-    assert_eq!(g.resolve_night().unwrap(), NightOutcome::Killed(p(1)));
+    assert_eq!(g.resolve_night().unwrap(), killed(p(1)));
 }
 
 #[test]
@@ -508,7 +527,7 @@ fn the_last_surviving_wolf_cannot_kill_itself() {
             waiting_on: vec![p(0)]
         })
     );
-    assert_eq!(wolves_kill(&mut g, p(3)), NightOutcome::Killed(p(3)));
+    assert_eq!(wolves_kill(&mut g, p(3)), killed(p(3)));
 }
 
 #[test]
@@ -523,7 +542,7 @@ fn a_lone_wolf_cannot_replace_a_valid_pick_with_itself() {
         g.current_night_picks(),
         [(p(0), p(1))].into_iter().collect()
     );
-    assert_eq!(g.resolve_night().unwrap(), NightOutcome::Killed(p(1)));
+    assert_eq!(g.resolve_night().unwrap(), killed(p(1)));
 }
 
 // ---------------------------------------------------------------------------
@@ -569,7 +588,7 @@ fn werewolves_win_at_night_after_an_opening_mislynch() {
     town_lynches(&mut g, p(2));
     wolves_kill(&mut g, p(3));
     town_lynches(&mut g, p(4));
-    assert_eq!(wolves_kill(&mut g, p(5)), NightOutcome::Killed(p(5)));
+    assert_eq!(wolves_kill(&mut g, p(5)), killed(p(5)));
     assert_eq!(g.phase(), Phase::Ended);
     assert_eq!(g.winner(), Some(Winner::Werewolves));
 }
@@ -701,7 +720,7 @@ fn pending_actors_tracks_who_still_owes_an_action() {
     town_lynches(&mut g, p(1));
     assert_eq!(g.pending_actors(), vec![p(0)]);
     g.night_action(p(0), p(3)).unwrap();
-    assert_eq!(g.resolve_night().unwrap(), NightOutcome::Killed(p(3)));
+    assert_eq!(g.resolve_night().unwrap(), killed(p(3)));
 }
 
 #[test]
@@ -769,16 +788,16 @@ fn identical_rosters_and_commands_produce_identical_games() {
 
 #[test]
 fn large_deals_include_all_special_roles_on_the_village_team() {
-    for count in 14..=20 {
+    for count in 19..=24 {
         for seed in 0..50 {
             let g = Engine::with_seed(count, seed).unwrap();
-            for role in [Role::Doctor, Role::Seer, Role::Hunter] {
+            for role in Engine::SPECIAL_ROLES {
                 assert_eq!(g.players().iter().filter(|p| p.role() == role).count(), 1);
             }
             assert_eq!(g.alive_count_by_role(), (count - count / 3, count / 3));
         }
     }
-    for role in [Role::Doctor, Role::Seer] {
+    for role in Engine::SPECIAL_ROLES {
         assert!(matches!(
             Engine::with_roles(&[W, role, role, V, V]),
             Err(GameError::InvalidRoster(_))
@@ -803,14 +822,14 @@ fn doctor_can_save_any_role_including_self_and_protection_expires() {
         g.doctor_action(p(1), p(target)).unwrap();
         g.seer_action(p(2), p(0)).unwrap();
         assert!(g.pending_actors().is_empty());
-        assert_eq!(g.resolve_night(), Ok(NightOutcome::Saved(p(target))));
+        assert_eq!(g.resolve_night(), Ok(saved(p(target))));
         assert_eq!(g.alive().count(), 6);
         assert!(g.current_doctor_picks().is_empty());
         assert_eq!(g.round(), 2);
         town_lynches(&mut g, p(4));
         g.doctor_action(p(1), p(0)).unwrap();
         g.seer_action(p(2), p(1)).unwrap();
-        assert_eq!(wolves_kill(&mut g, p(3)), NightOutcome::Killed(p(3)));
+        assert_eq!(wolves_kill(&mut g, p(3)), killed(p(3)));
     }
 }
 
@@ -851,7 +870,7 @@ fn day_one_inspection_is_optional_private_and_separate_from_night_one() {
         assert_eq!((next.round, next.phase), (1, Phase::Night));
         g.night_action(p(0), p(1)).unwrap();
         g.doctor_action(p(1), p(1)).unwrap();
-        assert_eq!(g.resolve_night(), Ok(NightOutcome::Saved(p(1))));
+        assert_eq!(g.resolve_night(), Ok(saved(p(1))));
         assert_eq!(g.phase(), Phase::Day);
         assert_eq!(g.round(), 2);
         assert_eq!(g.inspections(), &[result, next]);
@@ -931,7 +950,7 @@ fn seer_learns_alignment_once_per_night_and_history_survives_resolution() {
     );
     assert_eq!(g, before);
     g.doctor_action(p(1), p(1)).unwrap();
-    assert_eq!(wolves_kill(&mut g, p(1)), NightOutcome::Saved(p(1)));
+    assert_eq!(wolves_kill(&mut g, p(1)), saved(p(1)));
     town_lynches(&mut g, p(4));
     let second = g.seer_action(p(2), p(1)).unwrap();
     assert!(!second.is_werewolf);
@@ -1013,7 +1032,7 @@ fn a_split_pack_preserves_special_actions_and_seer_cannot_inspect_again() {
         g.seer_action(p(3), p(1)),
         Err(GameError::AlreadyActed(p(3)))
     );
-    assert_eq!(wolves_kill(&mut g, p(4)), NightOutcome::Saved(p(4)));
+    assert_eq!(wolves_kill(&mut g, p(4)), saved(p(4)));
 }
 
 #[test]
@@ -1022,10 +1041,7 @@ fn killed_special_roles_do_not_block_future_nights_and_still_act_on_their_last_n
         let mut g = night_game(&[W, Role::Doctor, Role::Seer, V, V, V]);
         g.doctor_action(p(1), p(3)).unwrap();
         g.seer_action(p(2), p(0)).unwrap();
-        assert_eq!(
-            wolves_kill(&mut g, p(victim)),
-            NightOutcome::Killed(p(victim))
-        );
+        assert_eq!(wolves_kill(&mut g, p(victim)), killed(p(victim)));
         assert_eq!(g.inspections().len(), 1);
         town_lynches(&mut g, p(4));
         assert!(!g.pending_actors().contains(&p(victim)));

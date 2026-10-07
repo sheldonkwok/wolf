@@ -84,10 +84,16 @@ fn saved_hunter_has_no_shot_and_shooting_an_innocent_can_lose() {
 }
 
 #[test]
-fn deals_include_exactly_one_hunter_and_duplicates_are_rejected() {
+fn deals_include_at_most_one_hunter_and_duplicates_are_rejected() {
+    let mut dealt = 0;
     for count in 5..=20 {
-        let g = Engine::with_seed(count, 42).unwrap();
-        assert_eq!(g.players().iter().filter(|p| p.role() == Hunter).count(), 1);
+        for seed in 0..20 {
+            let g = Engine::with_seed(count, seed).unwrap();
+            let hunters = g.players().iter().filter(|p| p.role() == Hunter).count();
+            assert!(hunters <= 1);
+            dealt += hunters;
+        }
     }
+    assert!(dealt > 0);
     assert!(Engine::with_roles(&[Werewolf, Hunter, Hunter, Villager, Villager]).is_err());
 }

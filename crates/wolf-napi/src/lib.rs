@@ -6,7 +6,7 @@ use napi_derive::napi;
 use wolf::rng::{self, SplitMix64};
 use wolf::{
     DayOutcome, Engine, GameError, NightOutcome, Phase as EnginePhase, PlayerId,
-    Role as EngineRole, Winner as EngineWinner,
+    Role as EngineRole, Winner as EngineWinner, WitchChoice,
 };
 
 // ----- enums (cross as TS string unions) --------------------------------------
@@ -18,6 +18,7 @@ pub enum Role {
     Doctor,
     Seer,
     Hunter,
+    Witch,
 }
 
 #[napi(string_enum)]
@@ -36,9 +37,9 @@ pub enum Winner {
 
 #[napi(string_enum)]
 pub enum NightKind {
-    Killed,
-    Saved,
+    Dawn,
     NoConsensus,
+    AwaitingWitch,
 }
 
 #[napi(string_enum)]
@@ -55,6 +56,7 @@ impl From<EngineRole> for Role {
             EngineRole::Doctor => Role::Doctor,
             EngineRole::Seer => Role::Seer,
             EngineRole::Hunter => Role::Hunter,
+            EngineRole::Witch => Role::Witch,
         }
     }
 }
@@ -67,6 +69,7 @@ impl From<Role> for EngineRole {
             Role::Doctor => EngineRole::Doctor,
             Role::Seer => EngineRole::Seer,
             Role::Hunter => EngineRole::Hunter,
+            Role::Witch => EngineRole::Witch,
         }
     }
 }
@@ -109,8 +112,8 @@ pub struct VoteView {
 #[napi(object)]
 pub struct NightResult {
     pub kind: NightKind,
-    pub killed: Option<u32>,
     pub saved: Option<u32>,
+    pub deaths: Vec<u32>,
     pub targets: Vec<u32>,
 }
 
@@ -156,6 +159,9 @@ pub struct GameState {
     pub night_picks: Vec<VoteView>,
     pub doctor_picks: Vec<VoteView>,
     pub inspections: Vec<InspectionView>,
+    pub heal_available: bool,
+    pub poison_available: bool,
+    pub witch_victim: Option<u32>,
     pub alive_villagers: u32,
     pub alive_wolves: u32,
 }
@@ -168,23 +174,23 @@ fn seat(id: PlayerId) -> u32 {
 
 fn night_result(outcome: NightOutcome) -> NightResult {
     match outcome {
-        NightOutcome::Killed(id) => NightResult {
-            kind: NightKind::Killed,
-            killed: Some(seat(id)),
-            saved: None,
-            targets: Vec::new(),
-        },
-        NightOutcome::Saved(id) => NightResult {
-            kind: NightKind::Saved,
-            killed: None,
-            saved: Some(seat(id)),
+        NightOutcome::Dawn { saved, deaths } => NightResult {
+            kind: NightKind::Dawn,
+            saved: saved.map(seat),
+            deaths: deaths.into_iter().map(seat).collect(),
             targets: Vec::new(),
         },
         NightOutcome::NoConsensus { targets } => NightResult {
             kind: NightKind::NoConsensus,
-            killed: None,
             saved: None,
+            deaths: Vec::new(),
             targets: targets.into_iter().map(seat).collect(),
+        },
+        NightOutcome::AwaitingWitch => NightResult {
+            kind: NightKind::AwaitingWitch,
+            saved: None,
+            deaths: Vec::new(),
+            targets: Vec::new(),
         },
     }
 }
@@ -225,6 +231,10 @@ pub enum GameErrorCode {
     NotAWerewolf,
     NotADoctor,
     NotASeer,
+    NotAWitch,
+    PackUndecided,
+    PotionSpent,
+    WitchCannotPoisonSelf,
     NotPendingHunter,
     LastWolfCannotTargetSelf,
     WrongPhase,
@@ -244,6 +254,10 @@ impl From<&GameError> for GameErrorCode {
             GameError::NotAWerewolf(_) => GameErrorCode::NotAWerewolf,
             GameError::NotADoctor(_) => GameErrorCode::NotADoctor,
             GameError::NotASeer(_) => GameErrorCode::NotASeer,
+            GameError::NotAWitch(_) => GameErrorCode::NotAWitch,
+            GameError::PackUndecided => GameErrorCode::PackUndecided,
+            GameError::PotionSpent(_) => GameErrorCode::PotionSpent,
+            GameError::WitchCannotPoisonSelf => GameErrorCode::WitchCannotPoisonSelf,
             GameError::NotPendingHunter(_) => GameErrorCode::NotPendingHunter,
             GameError::LastWolfCannotTargetSelf => GameErrorCode::LastWolfCannotTargetSelf,
             GameError::WrongPhase { .. } => GameErrorCode::WrongPhase,
@@ -322,6 +336,31 @@ impl Game {
             .map_err(to_js)
     }
 
+    /// Spend the witch's heal potion on the pack's locked target.
+    #[napi]
+    pub fn witch_heal(&mut self, witch: u32) -> napi::Result<()> {
+        self.inner
+            .witch_action(PlayerId(witch as usize), WitchChoice::Heal)
+            .map_err(to_js)
+    }
+
+    /// Spend the witch's poison potion on `target`.
+    #[napi]
+    pub fn witch_poison(&mut self, witch: u32, target: u32) -> napi::Result<()> {
+        let choice = WitchChoice::Poison(PlayerId(target as usize));
+        self.inner
+            .witch_action(PlayerId(witch as usize), choice)
+            .map_err(to_js)
+    }
+
+    /// End the witch's turn without using a potion.
+    #[napi]
+    pub fn witch_pass(&mut self, witch: u32) -> napi::Result<()> {
+        self.inner
+            .witch_action(PlayerId(witch as usize), WitchChoice::Pass)
+            .map_err(to_js)
+    }
+
     /// Take the eliminated hunter's final shot.
     #[napi]
     pub fn hunter_action(&mut self, hunter: u32, target: u32) -> napi::Result<()> {
@@ -330,7 +369,7 @@ impl Game {
             .map_err(to_js)
     }
 
-    /// Resolve the night and advance the phase.
+    /// Resolve the night, pausing first for a witch who still holds a potion.
     #[napi]
     pub fn resolve_night(&mut self) -> napi::Result<NightResult> {
         self.inner.resolve_night().map(night_result).map_err(to_js)
@@ -393,6 +432,9 @@ impl Game {
             night_picks: votes_to_views(e.current_night_picks()),
             doctor_picks: votes_to_views(e.current_doctor_picks()),
             inspections: e.inspections().iter().copied().map(Into::into).collect(),
+            heal_available: e.heal_available(),
+            poison_available: e.poison_available(),
+            witch_victim: e.witch_victim().map(seat),
             alive_villagers: villagers as u32,
             alive_wolves: wolves as u32,
         }

@@ -19,6 +19,14 @@ pub enum GameError {
     NotADoctor(PlayerId),
     /// A non-seer tried to inspect a player.
     NotASeer(PlayerId),
+    /// A non-witch tried to use a potion.
+    NotAWitch(PlayerId),
+    /// The witch tried to act before the werewolves locked in a target.
+    PackUndecided,
+    /// The witch tried to use a potion she has already spent.
+    PotionSpent(PlayerId),
+    /// The witch cannot poison herself.
+    WitchCannotPoisonSelf,
     /// Only the eliminated hunter awaiting their shot may act.
     NotPendingHunter(PlayerId),
     /// The last living werewolf cannot choose themselves as the night target.
@@ -47,6 +55,12 @@ impl fmt::Display for GameError {
             GameError::NotAWerewolf(id) => write!(f, "player {id} is not a werewolf"),
             GameError::NotADoctor(id) => write!(f, "player {id} is not a doctor"),
             GameError::NotASeer(id) => write!(f, "player {id} is not a seer"),
+            GameError::NotAWitch(id) => write!(f, "player {id} is not a witch"),
+            GameError::PackUndecided => {
+                write!(f, "the werewolves have not settled on a target yet")
+            }
+            GameError::PotionSpent(id) => write!(f, "player {id} has already used that potion"),
+            GameError::WitchCannotPoisonSelf => write!(f, "the witch cannot poison herself"),
             GameError::NotPendingHunter(id) => write!(f, "player {id} is not the pending hunter"),
             GameError::LastWolfCannotTargetSelf => {
                 write!(

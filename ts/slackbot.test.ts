@@ -15,7 +15,7 @@ class SeededLobby extends Lobby {
   }
 }
 
-function table(count = 8, seed = 1n, dev = false, recordResult?: (result: FinishedGame) => void) {
+function table(count = 8, seed = 2n, dev = false, recordResult?: (result: FinishedGame) => void) {
   const lobby = new SeededLobby(seed);
   const bot = new SlackGame("CGAME", lobby, { dev, seed, recordResult });
   let sequence = 0;
@@ -73,7 +73,7 @@ function eliminate(t: ReturnType<typeof table>, target: number): SlackMessage[] 
 }
 
 test("Day 1 inspection is private, optional, recoverable, and skipped when Day 1 ends", () => {
-  const t = table(8, 1n);
+  const t = table(8, 2n);
   const start = t.command("start");
   const game = t.lobby.game!;
   const before = game.state();
@@ -124,7 +124,7 @@ test("Day 1 inspection is private, optional, recoverable, and skipped when Day 1
 });
 
 test("an unused Day 1 inspection is skipped and later days offer none", () => {
-  const t = table(8, 1n);
+  const t = table(8, 2n);
   const start = t.command("start");
   const seer = t.lobby.game!.state().pendingInspectors[0]!;
   const value = t.value(`U${seer}`, seer)!;
@@ -147,9 +147,9 @@ test("an unused Day 1 inspection is skipped and later days offer none", () => {
 test("dev bot Seers may inspect on Day 1 without public tells", () => {
   const publicStarts = new Set<string>();
   for (const [seed, path] of [
-    [0n, "no-seer"],
-    [1n, "bot"],
-    [3n, "human"],
+    [1n, "no-seer"],
+    [2n, "bot"],
+    [7n, "human"],
   ] as const) {
     const t = table(1, seed, true);
     const start = t.command("start");
@@ -174,7 +174,7 @@ test("dev bot Seers may inspect on Day 1 without public tells", () => {
 });
 
 test("delivery failures retry the outbox without replaying the start", async () => {
-  const t = table(8, 1n);
+  const t = table(8, 2n);
   const sent: SlackMessage[] = [];
   let failing = true;
   let failures = 0;
@@ -795,7 +795,7 @@ for (const winner of ["Villagers", "Werewolves"] as const) {
   test(`completed ${winner} wins persist the original roster, including eliminated players`, () => {
     const stats = openStats(":memory:");
     try {
-      const t = table(5, 1n, false, (result) => stats.record("TWORKSPACE", result));
+      const t = table(5, 2n, false, (result) => stats.record("TWORKSPACE", result));
       t.command("start");
       const players = t.lobby.game!.state().players;
       t.bot.saveResults();
@@ -920,7 +920,7 @@ test("dev mode requires a human host and advertises solo play", () => {
 });
 
 test("dev bots cannot revote after the last human completes a tied ballot", () => {
-  const t = table(4, 1n, true);
+  const t = table(4, 2n, true);
   t.command("start");
   const game = t.lobby.game!;
   game.vote(0, 0);
@@ -936,14 +936,15 @@ test("dev bots cannot revote after the last human completes a tied ballot", () =
 });
 
 test.each([
-  { humans: 1, seed: 1n, role: "Doctor" },
+  { humans: 1, seed: 37n, role: "Doctor" },
   { humans: 1, seed: 2n, role: "Villager" },
-  { humans: 1, seed: 3n, role: "Seer" },
-  { humans: 1, seed: 4n, role: "Werewolf" },
-  { humans: 1, seed: 8n, role: "Hunter" },
-  { humans: 2, seed: 1n, role: "Doctor" },
-  { humans: 4, seed: 1n, role: "Doctor" },
-  { humans: 5, seed: 1n, role: "Doctor" },
+  { humans: 1, seed: 7n, role: "Seer" },
+  { humans: 1, seed: 12n, role: "Werewolf" },
+  { humans: 1, seed: 11n, role: "Hunter" },
+  { humans: 1, seed: 23n, role: "Witch" },
+  { humans: 2, seed: 37n, role: "Doctor" },
+  { humans: 4, seed: 37n, role: "Doctor" },
+  { humans: 5, seed: 37n, role: "Doctor" },
 ])(
   "dev game ($humans human players, $role host) waits for humans, persists, and restarts",
   ({ humans, seed, role }) => {
@@ -981,7 +982,17 @@ test.each([
         t.choose(state.pendingActors[0]!, state.players.find((p) => p.alive)!.id);
       } else if (state.phase === "Night") {
         const target = state.players.find((p) => p.alive && p.role !== "Werewolf")!.id;
-        for (const seat of humanActors) t.choose(seat, target);
+        for (const seat of humanActors) {
+          if (state.players[seat]!.role !== "Witch") t.choose(seat, target);
+          else {
+            const user = `U${seat}`;
+            const pass = t
+              .dm(user)
+              .flatMap((m) => m.choices ?? [])
+              .find((c) => c.label === "Do nothing")!;
+            t.receive({ kind: "choice", user, channel: `D${user}`, value: pass.value });
+          }
+        }
       } else {
         expect(t.dm(`U${humanActors[0]}`).some((m) => m.choices)).toBe(
           state.pendingInspectors.includes(humanActors[0]!),
@@ -1085,9 +1096,9 @@ test("doctor saves are public without revealing the doctor and seer results rema
   t.choose(doctor, target);
   expect(t.choose(doctor, doctor)[0]?.text).toContain("already acted");
   const dawn = players.filter((p) => p.role === "Werewolf").flatMap((p) => t.choose(p.id, target));
-  expect(dawn.find((m) => m.text.includes("Doctor saved"))).toEqual({
+  expect(dawn.find((m) => m.text.includes("saved"))).toEqual({
     destination: "channel",
-    text: `The Werewolves attacked <@U${target}>, but the Doctor saved them! No one was eliminated.`,
+    text: `The Werewolves attacked <@U${target}>, but they were saved! No one was eliminated.`,
   });
   expect(game.state().players.filter((p) => p.alive).length).toBe(6);
   expect(game.state().round).toBe(2);

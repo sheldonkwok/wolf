@@ -36,12 +36,19 @@ test("opening Home publishes instructions only for the configured workspace and 
   expect(JSON.stringify(published[0])).toContain("<#C1>");
   expect(JSON.stringify(published[0])).toContain("<@B1>");
   const page = JSON.stringify(published[0]);
-  for (const role of ["Villager", "Werewolf", "Doctor", "Seer", "Hunter"]) {
+  for (const role of ["Villager", "Werewolf", "Doctor", "Seer", "Hunter", "Witch"]) {
     expect(page).toContain(`*${role}* —`);
   }
   expect(page).toContain("*Role selection*");
   expect(page).toContain("not every game includes every special role");
-  expect(page).toContain("the Doctor cannot protect against the shot");
+  expect(page).toContain("neither the Doctor nor the Witch can stop the shot");
+  expect(page).toContain("When eliminated by a vote, the Werewolves, or the Witch's poison");
+  expect(page).toContain("one healing potion and one poison for the whole game");
+  expect(page).toContain("one potion per night at most");
+  expect(page).toContain("While you hold the healing potion you are told who was attacked");
+  expect(page).toContain("a night can eliminate two players");
+  expect(page).toContain("randomly chosen from Doctor, Seer, Hunter, and Witch");
+  expect(page).toContain("the Hunter, and the Witch win together");
   expect(page).toContain("Play and victory checks wait for your shot");
   expect(page).toContain("Every game starts on Day 1 as soon as roles are dealt");
   expect(page).toContain("one private inspection during Day 1, their only daytime inspection");
