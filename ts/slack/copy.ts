@@ -17,7 +17,9 @@ export const SHERIFF_COMMAND = "`@werewolf sheriff @player`";
 
 export const LAST_WORDS_COMMAND = "`@werewolf last words <message>`";
 
-// The 12-player structured rules: roster, sheriff election, the Fool, and Night 1 last words.
+export const NOMINATE_COMMANDS = "`@werewolf run` or `@werewolf pass`";
+
+// The 12-player structured rules: roster, night-first order, sheriff election and badge, the silenced Hunter, and Night 1 last words.
 export function structuredRules(): string {
-  return `With exactly 12 players, the game uses Chinese structured rules: 4 Werewolves, 4 Villagers, a Seer, a Witch, a Hunter, and a Fool. It opens with a sheriff election before Day 1: every living player votes with ${SHERIFF_COMMAND}, and an early majority or the unique leader once everyone has voted becomes sheriff; a tie means no sheriff. The sheriff's day vote counts as 1.5 votes; the badge is lost when the sheriff dies. Players eliminated on Night 1 may share last words once with ${LAST_WORDS_COMMAND} before Day 2 ends.`;
+  return `With exactly 12 players, the game uses Chinese structured rules: 4 Werewolves, 4 Villagers, a Seer, a Witch, a Hunter, and a Fool. Play starts with Night 1. The next morning, before the night's deaths are announced, everyone declares with ${NOMINATE_COMMANDS}, including that night's victims. Non-candidates then elect a sheriff with ${SHERIFF_COMMAND}: a lone candidate wins unopposed; otherwise an early majority or the unique leader once everyone has voted wins, and a tie means no sheriff. Candidates cannot vote and may drop out with \`@werewolf withdraw\`. The sheriff's day vote counts as 1.5 votes; a dead sheriff passes the badge to a living player or tears it up. Night 1 victims may share last words once with ${LAST_WORDS_COMMAND} before Day 1 ends. A poisoned Hunter cannot shoot.`;
 }

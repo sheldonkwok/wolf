@@ -151,7 +151,7 @@ fn werewolf_count_scales_with_player_count() {
         assert_eq!(g.players().len(), players);
         assert!(g.players().iter().all(|p| p.is_alive()));
         let opening = if players == 12 {
-            Phase::Sheriff
+            Phase::Night
         } else {
             Phase::Day
         };

@@ -6,6 +6,8 @@ import {
   botDayInspection,
   botDayVotes,
   botNightActions,
+  botPassBadge,
+  botSheriffNominations,
   botSheriffVotes,
   isWolf,
   livingIds,
@@ -298,6 +300,7 @@ export class Table {
         this.dawn = outcome;
         break;
       }
+      if (outcome.kind === "Election") break;
       if (outcome.kind === "AwaitingWitch") {
         if (!(await this.runWitch())) return false;
         continue;
@@ -316,20 +319,12 @@ export class Table {
   private async runDay(): Promise<boolean> {
     this.drawBanner(`Day ${this.state().round}`);
 
+    const opening = this.state().round === 1 && this.state().ruleset === "Standard";
     console.log(
-      this.state().round === 1
-        ? "The game begins. Discuss who you suspect before voting."
-        : "Sun rises, everyone wake up!",
+      opening ? "The game begins. Discuss who you suspect before voting." : "Sun rises, everyone wake up!",
     );
-    const dawn = this.dawn;
+    this.printDawn(this.dawn);
     this.dawn = null;
-    if (dawn?.saved != null)
-      console.log(`The Werewolves attacked ${nameOf(dawn.saved)}, but they were saved!`);
-    for (const victim of dawn?.deaths ?? []) {
-      console.log(
-        `Sadly, ${nameOf(victim)} was eliminated during the night! (${roleTag(this.game.roleOf(victim))})`,
-      );
-    }
 
     if (!(await this.runLastWords())) return false;
     const alive = livingIds(this.state()).map(nameOf);
@@ -370,28 +365,71 @@ export class Table {
     return true;
   }
 
-  // The structured game's opening election; the winner's day votes count 1.5.
+  private printDawn(dawn: { saved: number | null; deaths: number[] } | null): void {
+    if (dawn?.saved != null)
+      console.log(`The Werewolves attacked ${nameOf(dawn.saved)}, but they were saved!`);
+    for (const victim of dawn?.deaths ?? []) {
+      console.log(
+        `Sadly, ${nameOf(victim)} was eliminated during the night! (${roleTag(this.game.roleOf(victim))})`,
+      );
+    }
+  }
+
+  // The structured game's first morning: candidates declare, the others elect, then the Night 1 report.
   private async runSheriff(): Promise<boolean> {
     this.drawBanner("Sheriff election");
     console.log(
-      `Elect a sheriff whose day vote counts 1.5. ${this.state().majorityRequired} votes elect immediately; otherwise the unique leader wins once everyone votes, and a tie means no sheriff.`,
+      "Morning breaks. Before the night's report, the village elects a sheriff whose day vote counts 1.5. Candidates cannot vote.",
+    );
+    if (this.state().pendingActors.includes(this.me)) {
+      const word = await this.promptWord("Do you run for sheriff?", ["run", "pass"]);
+      if (word === null) return false;
+      this.game.sheriffNominate(this.me, word === "run");
+    }
+    botSheriffNominations(this.game, this.rng, this.isBot, () => {});
+    const candidates = this.state().sheriffCandidates;
+    console.log(
+      candidates.length ? `Candidates: ${candidates.map(nameOf).join(", ")}` : "Nobody runs for sheriff.",
     );
     const ready = () => ballotClosed(this.state());
     while (!ready()) {
-      const picked = await this.promptPlayer("Who do you vote for as sheriff?", livingIds(this.state()));
-      if (picked === null) return false;
-      this.game.sheriffVote(this.me, picked);
-      console.log(`${nameOf(this.me)} → ${nameOf(picked)}`);
+      let myVote: number | null = null;
+      if (this.state().pendingActors.includes(this.me)) {
+        myVote = await this.promptPlayer("Who do you vote for as sheriff?", candidates);
+        if (myVote === null) return false;
+        this.game.sheriffVote(this.me, myVote);
+        console.log(`${nameOf(this.me)} → ${nameOf(myVote)}`);
+      }
       if (ready()) break;
-      botSheriffVotes(this.game, this.rng, this.isBot, picked, (voter, candidate) =>
+      botSheriffVotes(this.game, this.rng, this.isBot, myVote, (voter, candidate) =>
         console.log(`${nameOf(voter)} → ${nameOf(candidate)}`),
       );
     }
     const outcome = this.game.resolveSheriff();
     console.log(
-      outcome.kind === "Elected"
-        ? `${nameOf(outcome.sheriff)} is the sheriff.`
-        : "The sheriff vote is tied. There is no sheriff this game.",
+      outcome.kind === "Elected" ? `${nameOf(outcome.sheriff)} is the sheriff.` : "No sheriff was elected.",
+    );
+    this.printDawn(outcome);
+    return true;
+  }
+
+  // A dead sheriff passes the badge or tears it up.
+  private async runBadge(): Promise<boolean> {
+    const sheriff = this.state().pendingActors[0]!;
+    console.log(`${nameOf(sheriff)} was the sheriff and must pass the badge.`);
+    let successor: number | undefined;
+    if (sheriff === this.me) {
+      const word = await this.promptWord("Pass the badge or tear it up?", ["pass", "tear"]);
+      if (word === null) return false;
+      if (word === "pass") {
+        const picked = await this.promptPlayer("Who receives the badge?", livingIds(this.state()));
+        if (picked === null) return false;
+        successor = picked;
+      }
+      this.game.passBadge(sheriff, successor);
+    } else successor = botPassBadge(this.game, this.rng, sheriff);
+    console.log(
+      successor === undefined ? "The badge is torn up." : `${nameOf(successor)} is the new sheriff.`,
     );
     return true;
   }
@@ -457,6 +495,7 @@ export class Table {
       else if (phase === "Night") step = await this.runNight();
       else if (phase === "Day") step = await this.runDay();
       else if (phase === "Hunter") step = await this.runHunter();
+      else if (phase === "Badge") step = await this.runBadge();
       else break;
 
       if (!step) {

@@ -42,24 +42,23 @@ function table(count = 8, seed = 2n, dev = false, recordResult?: (result: Finish
   for (let seat = 0; seat < count; seat++) command("join", `U${seat}`);
   const vote = (seat: number, target: number) =>
     command(dev ? `vote ${target + 1}` : `vote <@U${target}>`, `U${seat}`);
-  const sheriff = (seat: number, target: number) => command(`sheriff <@U${target}>`, `U${seat}`);
-  return { bot, lobby, messages, receive, command, dm, choose, value, vote, sheriff };
+  return { bot, lobby, messages, receive, command, dm, choose, value, vote };
 }
 
-// Every player elects seat 0 so a structured game reaches Day 1.
-function elect(t: ReturnType<typeof table>) {
-  if (t.lobby.game!.state().phase !== "Sheriff") return;
-  for (const player of t.lobby.game!.state().players) {
-    if (t.lobby.game!.state().phase === "Sheriff") t.sheriff(player.id, 0);
-  }
+// A structured game plays Night 1, then nobody runs, so Day 1 begins with no sheriff.
+function openStructured(t: ReturnType<typeof table>) {
+  if (t.lobby.game!.state().ruleset !== "Structured" || t.lobby.game!.state().round !== 1) return;
+  while (t.lobby.game!.state().phase === "Night") morning(t);
+  for (const player of t.lobby.game!.state().players.filter((p) => p.alive))
+    t.command("pass", `U${player.id}`);
   expect(t.lobby.game!.state().phase).toBe("Day");
 }
 
 function reachNight(t: ReturnType<typeof table>) {
-  elect(t);
+  openStructured(t);
   eliminate(t, t.lobby.game!.state().players.findLast((p) => p.alive && p.role === "Villager")!.id);
   expect(t.lobby.game!.state().phase).toBe("Night");
-  expect(t.lobby.game!.state().round).toBe(1);
+  expect(t.lobby.game!.state().round).toBe(t.lobby.game!.state().ruleset === "Structured" ? 2 : 1);
 }
 
 function morning(t: ReturnType<typeof table>) {

@@ -66,7 +66,10 @@ test("opening Home publishes instructions only for the configured workspace and 
   expect(page).toContain("`@werewolf sheriff @player`");
   expect(page).toContain("day vote counts as 1.5 votes");
   expect(page).toContain("`@werewolf last words <message>`");
-  expect(page).toContain("12-player games first elect a sheriff");
+  expect(page).toContain("12-player games start with Night 1 and elect a sheriff the next morning");
+  expect(page).toContain("`@werewolf run` or `@werewolf pass`");
+  expect(page).toContain("passes the badge to a living player or tears it up");
+  expect(page).toContain("A poisoned Hunter cannot shoot");
   expect(page).toContain("they reveal their card and stay in the game but can no longer vote");
   expect(page).toContain("the Witch, and the Fool win together");
   expect(page).toContain("With exactly 12 players, the game uses Chinese structured rules instead");

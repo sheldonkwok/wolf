@@ -19,22 +19,35 @@ fn step(g: &mut Engine, rng: &mut SplitMix64, seen: &mut Seen) {
     let alive = living(g);
     let pending = g.pending_actors();
     match g.phase() {
+        Phase::Sheriff if !g.sheriff_voting() => {
+            g.sheriff_nominate(pending[0], rng.chance(25)).unwrap();
+        }
         Phase::Sheriff => {
+            let candidates = g.sheriff_candidates();
             if g.majority_target().is_some() || pending.is_empty() {
-                match g.resolve_sheriff().unwrap() {
+                let election = g.resolve_sheriff().unwrap();
+                assert_eq!(g.pending_last_words(), election.deaths);
+                assert!(election.deaths.iter().all(|&id| !g.is_alive(id)));
+                match election.outcome {
                     SheriffOutcome::Elected(id) => {
-                        assert_eq!(g.sheriff(), Some(id));
-                        assert_eq!(g.vote_weight(id), 1.5);
+                        assert!(candidates.contains(&id));
                         seen.elected = true;
                     }
                     SheriffOutcome::Tied => seen.no_sheriff = true,
                 }
-                assert_eq!(g.phase(), Phase::Day);
+                assert_ne!(g.phase(), Phase::Sheriff);
+            } else if rng.chance(5) {
+                g.sheriff_withdraw(pick(rng, &candidates)).unwrap();
+                seen.withdrawn = true;
             } else {
-                // A small field of candidates so both elections and ties happen.
-                let candidate = pick(rng, &alive[..3]);
-                g.sheriff_vote(pending[0], candidate).unwrap();
+                g.sheriff_vote(pending[0], pick(rng, &candidates)).unwrap();
             }
+        }
+        Phase::Badge => {
+            let successor = rng.chance(70).then(|| pick(rng, &alive));
+            g.pass_badge(pending[0], successor).unwrap();
+            assert_eq!(g.sheriff(), successor);
+            seen.badge_passed |= successor.is_some();
         }
         Phase::Day => {
             for words in g.pending_last_words() {
@@ -61,13 +74,13 @@ fn step(g: &mut Engine, rng: &mut SplitMix64, seen: &mut Seen) {
         Phase::Night => {
             let Some(&actor) = pending.first() else {
                 let round = g.round();
-                if let NightOutcome::Dawn { deaths, .. } = g.resolve_night().unwrap() {
-                    let granted = g.pending_last_words();
-                    if round == 1 {
-                        assert_eq!(granted, deaths);
-                    } else {
-                        assert!(granted.is_empty());
+                match g.resolve_night().unwrap() {
+                    NightOutcome::Election => assert_eq!(round, 1),
+                    NightOutcome::Dawn { .. } => {
+                        assert!(round > 1);
+                        assert!(g.pending_last_words().is_empty());
                     }
+                    _ => {}
                 }
                 return;
             };
@@ -108,6 +121,8 @@ struct Seen {
     no_sheriff: bool,
     fool_revealed: bool,
     last_words: bool,
+    withdrawn: bool,
+    badge_passed: bool,
     villagers: bool,
     werewolves: bool,
 }
@@ -139,6 +154,10 @@ fn random_structured_games_end_with_a_consistent_winner() {
     }
     assert!(seen.elected && seen.no_sheriff, "both election results");
     assert!(seen.fool_revealed, "a fool was revealed");
+    assert!(
+        seen.withdrawn && seen.badge_passed,
+        "candidates withdrew and badges were passed"
+    );
     assert!(seen.last_words, "last words were shared");
     assert!(seen.villagers && seen.werewolves, "both teams won");
 }

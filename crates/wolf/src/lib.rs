@@ -27,6 +27,6 @@ mod engine;
 pub mod rng;
 
 pub use engine::{
-    DayOutcome, Engine, GameError, Inspection, NightOutcome, Phase, Player, PlayerId, Role,
-    Ruleset, SheriffOutcome, Winner, WitchChoice,
+    DayOutcome, Election, Engine, GameError, Inspection, NightOutcome, Phase, Player, PlayerId,
+    Role, Ruleset, SheriffOutcome, Winner, WitchChoice,
 };

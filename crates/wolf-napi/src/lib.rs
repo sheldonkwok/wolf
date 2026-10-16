@@ -5,7 +5,7 @@ use napi_derive::napi;
 
 use wolf::rng::{self, SplitMix64};
 use wolf::{
-    DayOutcome, Engine, GameError, NightOutcome, Phase as EnginePhase, PlayerId,
+    DayOutcome, Election, Engine, GameError, NightOutcome, Phase as EnginePhase, PlayerId,
     Role as EngineRole, Ruleset as EngineRuleset, SheriffOutcome, Winner as EngineWinner,
     WitchChoice,
 };
@@ -30,6 +30,7 @@ pub enum Phase {
     Ended,
     Hunter,
     Sheriff,
+    Badge,
 }
 
 #[napi(string_enum)]
@@ -49,6 +50,7 @@ pub enum NightKind {
     Dawn,
     NoConsensus,
     AwaitingWitch,
+    Election,
 }
 
 #[napi(string_enum)]
@@ -100,6 +102,7 @@ impl From<EnginePhase> for Phase {
             EnginePhase::Ended => Phase::Ended,
             EnginePhase::Hunter => Phase::Hunter,
             EnginePhase::Sheriff => Phase::Sheriff,
+            EnginePhase::Badge => Phase::Badge,
         }
     }
 }
@@ -169,6 +172,15 @@ pub struct DayResult {
 pub struct SheriffResult {
     pub kind: SheriffKind,
     pub sheriff: Option<u32>,
+    /// The Night 1 report the election delayed.
+    pub saved: Option<u32>,
+    pub deaths: Vec<u32>,
+}
+
+#[napi(object)]
+pub struct NominationView {
+    pub player: u32,
+    pub runs: bool,
 }
 
 #[napi(object)]
@@ -214,6 +226,9 @@ pub struct GameState {
     pub alive_villagers: u32,
     pub alive_wolves: u32,
     pub sheriff: Option<u32>,
+    pub sheriff_voting: bool,
+    pub sheriff_candidates: Vec<u32>,
+    pub nominations: Vec<NominationView>,
     pub sheriff_votes: Vec<VoteView>,
     pub revealed_fool: Option<u32>,
     pub last_words: Vec<u32>,
@@ -245,6 +260,12 @@ fn night_result(outcome: NightOutcome) -> NightResult {
             deaths: Vec::new(),
             targets: Vec::new(),
         },
+        NightOutcome::Election => NightResult {
+            kind: NightKind::Election,
+            saved: None,
+            deaths: Vec::new(),
+            targets: Vec::new(),
+        },
     }
 }
 
@@ -268,16 +289,16 @@ fn day_result(outcome: DayOutcome) -> DayResult {
     }
 }
 
-fn sheriff_result(outcome: SheriffOutcome) -> SheriffResult {
-    match outcome {
-        SheriffOutcome::Elected(id) => SheriffResult {
-            kind: SheriffKind::Elected,
-            sheriff: Some(seat(id)),
-        },
-        SheriffOutcome::Tied => SheriffResult {
-            kind: SheriffKind::Tied,
-            sheriff: None,
-        },
+fn sheriff_result(election: Election) -> SheriffResult {
+    let (kind, sheriff) = match election.outcome {
+        SheriffOutcome::Elected(id) => (SheriffKind::Elected, Some(seat(id))),
+        SheriffOutcome::Tied => (SheriffKind::Tied, None),
+    };
+    SheriffResult {
+        kind,
+        sheriff,
+        saved: election.saved.map(seat),
+        deaths: election.deaths.into_iter().map(seat).collect(),
     }
 }
 
@@ -316,6 +337,10 @@ pub enum GameErrorCode {
     ActionsIncomplete,
     CannotVote,
     NoLastWords,
+    NominationsOpen,
+    NominationsClosed,
+    NotACandidate,
+    NotTheSheriff,
     GameOver,
 }
 
@@ -341,6 +366,10 @@ impl From<&GameError> for GameErrorCode {
             GameError::ActionsIncomplete { .. } => GameErrorCode::ActionsIncomplete,
             GameError::CannotVote(_) => GameErrorCode::CannotVote,
             GameError::NoLastWords(_) => GameErrorCode::NoLastWords,
+            GameError::NominationsOpen => GameErrorCode::NominationsOpen,
+            GameError::NominationsClosed => GameErrorCode::NominationsClosed,
+            GameError::NotACandidate(_) => GameErrorCode::NotACandidate,
+            GameError::NotTheSheriff(_) => GameErrorCode::NotTheSheriff,
             GameError::GameOver => GameErrorCode::GameOver,
         }
     }
@@ -397,6 +426,33 @@ impl Game {
             .map_err(to_js)
     }
 
+    /// Declare whether `player` runs for sheriff.
+    #[napi]
+    pub fn sheriff_nominate(&mut self, player: u32, run: bool) -> napi::Result<()> {
+        self.inner
+            .sheriff_nominate(PlayerId(player as usize), run)
+            .map_err(to_js)
+    }
+
+    /// Drop `candidate` out of the sheriff race.
+    #[napi]
+    pub fn sheriff_withdraw(&mut self, candidate: u32) -> napi::Result<()> {
+        self.inner
+            .sheriff_withdraw(PlayerId(candidate as usize))
+            .map_err(to_js)
+    }
+
+    /// The dead sheriff hands the badge to `successor`, or tears it up when omitted.
+    #[napi]
+    pub fn pass_badge(&mut self, sheriff: u32, successor: Option<u32>) -> napi::Result<()> {
+        self.inner
+            .pass_badge(
+                PlayerId(sheriff as usize),
+                successor.map(|id| PlayerId(id as usize)),
+            )
+            .map_err(to_js)
+    }
+
     /// Record or replace `voter`'s sheriff vote for `candidate`.
     #[napi]
     pub fn sheriff_vote(&mut self, voter: u32, candidate: u32) -> napi::Result<()> {
@@ -405,7 +461,7 @@ impl Game {
             .map_err(to_js)
     }
 
-    /// Resolve the sheriff election and begin Day 1.
+    /// Resolve the sheriff election and apply the Night 1 report.
     #[napi]
     pub fn resolve_sheriff(&mut self) -> napi::Result<SheriffResult> {
         self.inner
@@ -552,6 +608,16 @@ impl Game {
             alive_villagers: villagers as u32,
             alive_wolves: wolves as u32,
             sheriff: e.sheriff().map(seat),
+            sheriff_voting: e.sheriff_voting(),
+            sheriff_candidates: e.sheriff_candidates().into_iter().map(seat).collect(),
+            nominations: e
+                .sheriff_nominations()
+                .into_iter()
+                .map(|(player, runs)| NominationView {
+                    player: seat(player),
+                    runs,
+                })
+                .collect(),
             sheriff_votes: votes_to_views(e.current_sheriff_votes()),
             revealed_fool: e.revealed_fool().map(seat),
             last_words: e.pending_last_words().into_iter().map(seat).collect(),

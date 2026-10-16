@@ -34,8 +34,11 @@ function playOut(game: Game): void {
     const s = game.state();
     if (s.phase === "Ended") return;
     if (s.phase === "Sheriff") {
-      for (const voter of s.players) game.sheriffVote(voter.id, 0);
-      expect(game.resolveSheriff()).toEqual({ kind: "Elected", sheriff: 0 });
+      const living = s.players.filter((p) => p.alive);
+      for (const player of living) game.sheriffNominate(player.id, player.id === living[0]!.id);
+      expect(game.resolveSheriff()).toMatchObject({ kind: "Elected", sheriff: living[0]!.id });
+    } else if (s.phase === "Badge") {
+      game.passBadge(s.pendingActors[0]!);
     } else if (s.phase === "Hunter") {
       game.hunterAction(s.pendingActors[0]!, s.players.find((p) => p.alive)!.id);
     } else if (s.phase === "Night") {
@@ -51,7 +54,7 @@ function playOut(game: Game): void {
         game.witchPass(game.state().pendingActors[0]!);
         night = game.resolveNight();
       }
-      expect(night).toEqual({ kind: "Dawn", saved: null, deaths: [victim] });
+      if (night.kind !== "Election") expect(night).toEqual({ kind: "Dawn", saved: null, deaths: [victim] });
     } else {
       const living = s.players.filter((p) => p.alive).map((p) => p.id);
       const target = s.players.find((p) => p.alive && p.role === "Werewolf")!.id;

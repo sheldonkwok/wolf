@@ -43,6 +43,14 @@ pub enum GameError {
     CannotVote(PlayerId),
     /// This player has no last words to share.
     NoLastWords(PlayerId),
+    /// Sheriff voting waits until every living player has declared.
+    NominationsOpen,
+    /// Candidacy cannot change once sheriff voting is open.
+    NominationsClosed,
+    /// The player is not a standing sheriff candidate.
+    NotACandidate(PlayerId),
+    /// Only the dead sheriff may pass the badge.
+    NotTheSheriff(PlayerId),
     /// The game is over; no further commands are accepted.
     GameOver,
 }
@@ -88,6 +96,15 @@ impl fmt::Display for GameError {
             }
             GameError::CannotVote(id) => write!(f, "player {id} has lost their vote"),
             GameError::NoLastWords(id) => write!(f, "player {id} has no last words to share"),
+            GameError::NominationsOpen => {
+                write!(
+                    f,
+                    "everyone must declare for or against running for sheriff first"
+                )
+            }
+            GameError::NominationsClosed => write!(f, "sheriff candidacy is closed"),
+            GameError::NotACandidate(id) => write!(f, "player {id} is not a sheriff candidate"),
+            GameError::NotTheSheriff(id) => write!(f, "player {id} does not hold the badge"),
             GameError::GameOver => write!(f, "the game is over"),
         }
     }

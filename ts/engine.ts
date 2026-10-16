@@ -42,6 +42,10 @@ const GAME_ERROR_CODES: Record<NativeGameErrorCode, true> = {
   ActionsIncomplete: true,
   CannotVote: true,
   NoLastWords: true,
+  NominationsOpen: true,
+  NominationsClosed: true,
+  NotACandidate: true,
+  NotTheSheriff: true,
   GameOver: true,
 };
 
@@ -83,14 +87,19 @@ function attempt<T>(call: () => T): T {
 export type NightResolution =
   | { kind: "Dawn"; saved: number | null; deaths: number[] }
   | { kind: "NoConsensus"; targets: number[] }
-  | { kind: "AwaitingWitch" };
+  | { kind: "AwaitingWitch" }
+  | { kind: "Election" };
 
 export type DayResolution =
   | { kind: "Eliminated"; eliminated: number }
   | { kind: "FoolRevealed"; fool: number }
   | { kind: "Tied" };
 
-export type SheriffResolution = { kind: "Elected"; sheriff: number } | { kind: "Tied" };
+// The election also carries the Night 1 report it delayed.
+export type SheriffResolution = ({ kind: "Elected"; sheriff: number } | { kind: "Tied" }) & {
+  saved: number | null;
+  deaths: number[];
+};
 
 function isSeat(value: unknown): value is number {
   return typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
@@ -102,6 +111,7 @@ function isSeats(value: unknown): value is number[] {
 
 function normalizeNight(result: NightResult): NightResolution {
   if (result?.kind === "AwaitingWitch") return { kind: "AwaitingWitch" };
+  if (result?.kind === "Election") return { kind: "Election" };
   if (result?.kind === "Dawn" && isSeats(result.deaths) && (result.saved == null || isSeat(result.saved))) {
     const saved = result.saved ?? null;
     // The engine never reports nobody attacked, nor a saved player among the dead.
@@ -126,9 +136,12 @@ function normalizeDay(result: DayResult): DayResolution {
 }
 
 function normalizeSheriff(result: SheriffResult): SheriffResolution {
-  if (result?.kind === "Tied" && result.sheriff == null) return { kind: "Tied" };
-  if (result?.kind === "Elected" && isSeat(result.sheriff))
-    return { kind: "Elected", sheriff: result.sheriff };
+  if (isSeats(result?.deaths) && (result.saved == null || isSeat(result.saved))) {
+    const report = { saved: result.saved ?? null, deaths: result.deaths };
+    if (result.kind === "Tied" && result.sheriff == null) return { kind: "Tied", ...report };
+    if (result.kind === "Elected" && isSeat(result.sheriff))
+      return { kind: "Elected", sheriff: result.sheriff, ...report };
+  }
   throw new GameError("Unknown", "Invalid sheriff resolution from native addon");
 }
 
@@ -196,6 +209,19 @@ export class Game {
 
   resolveDay(): DayResolution {
     return normalizeDay(attempt(() => this.inner.resolveDay()));
+  }
+
+  sheriffNominate(player: number, run: boolean): void {
+    attempt(() => this.inner.sheriffNominate(player, run));
+  }
+
+  sheriffWithdraw(candidate: number): void {
+    attempt(() => this.inner.sheriffWithdraw(candidate));
+  }
+
+  // Omit `successor` to tear up the badge.
+  passBadge(sheriff: number, successor?: number): void {
+    attempt(() => this.inner.passBadge(sheriff, successor));
   }
 
   sheriffVote(voter: number, candidate: number): void {
