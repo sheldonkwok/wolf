@@ -6,7 +6,8 @@ use napi_derive::napi;
 use wolf::rng::{self, SplitMix64};
 use wolf::{
     DayOutcome, Engine, GameError, NightOutcome, Phase as EnginePhase, PlayerId,
-    Role as EngineRole, Winner as EngineWinner, WitchChoice,
+    Role as EngineRole, Ruleset as EngineRuleset, SheriffOutcome, Winner as EngineWinner,
+    WitchChoice,
 };
 
 // ----- enums (cross as TS string unions) --------------------------------------
@@ -19,6 +20,7 @@ pub enum Role {
     Seer,
     Hunter,
     Witch,
+    Fool,
 }
 
 #[napi(string_enum)]
@@ -27,6 +29,13 @@ pub enum Phase {
     Day,
     Ended,
     Hunter,
+    Sheriff,
+}
+
+#[napi(string_enum)]
+pub enum Ruleset {
+    Standard,
+    Structured,
 }
 
 #[napi(string_enum)]
@@ -46,6 +55,13 @@ pub enum NightKind {
 pub enum DayKind {
     Eliminated,
     Tied,
+    FoolRevealed,
+}
+
+#[napi(string_enum)]
+pub enum SheriffKind {
+    Elected,
+    Tied,
 }
 
 impl From<EngineRole> for Role {
@@ -57,6 +73,7 @@ impl From<EngineRole> for Role {
             EngineRole::Seer => Role::Seer,
             EngineRole::Hunter => Role::Hunter,
             EngineRole::Witch => Role::Witch,
+            EngineRole::Fool => Role::Fool,
         }
     }
 }
@@ -70,6 +87,7 @@ impl From<Role> for EngineRole {
             Role::Seer => EngineRole::Seer,
             Role::Hunter => EngineRole::Hunter,
             Role::Witch => EngineRole::Witch,
+            Role::Fool => EngineRole::Fool,
         }
     }
 }
@@ -81,6 +99,25 @@ impl From<EnginePhase> for Phase {
             EnginePhase::Day => Phase::Day,
             EnginePhase::Ended => Phase::Ended,
             EnginePhase::Hunter => Phase::Hunter,
+            EnginePhase::Sheriff => Phase::Sheriff,
+        }
+    }
+}
+
+impl From<EngineRuleset> for Ruleset {
+    fn from(r: EngineRuleset) -> Self {
+        match r {
+            EngineRuleset::Standard => Ruleset::Standard,
+            EngineRuleset::Structured => Ruleset::Structured,
+        }
+    }
+}
+
+impl From<Ruleset> for EngineRuleset {
+    fn from(r: Ruleset) -> Self {
+        match r {
+            Ruleset::Standard => EngineRuleset::Standard,
+            Ruleset::Structured => EngineRuleset::Structured,
         }
     }
 }
@@ -101,6 +138,10 @@ pub struct PlayerView {
     pub id: u32,
     pub role: Role,
     pub alive: bool,
+    /// False once dead or revealed as the Fool.
+    pub can_vote: bool,
+    /// 1.5 for the sheriff during the day, otherwise 1.
+    pub vote_weight: f64,
 }
 
 #[napi(object)]
@@ -121,6 +162,13 @@ pub struct NightResult {
 pub struct DayResult {
     pub kind: DayKind,
     pub eliminated: Option<u32>,
+    pub fool: Option<u32>,
+}
+
+#[napi(object)]
+pub struct SheriffResult {
+    pub kind: SheriffKind,
+    pub sheriff: Option<u32>,
 }
 
 #[napi(object)]
@@ -146,6 +194,7 @@ impl From<wolf::Inspection> for InspectionView {
 
 #[napi(object)]
 pub struct GameState {
+    pub ruleset: Ruleset,
     pub phase: Phase,
     pub round: u32,
     pub winner: Option<Winner>,
@@ -164,6 +213,10 @@ pub struct GameState {
     pub witch_victim: Option<u32>,
     pub alive_villagers: u32,
     pub alive_wolves: u32,
+    pub sheriff: Option<u32>,
+    pub sheriff_votes: Vec<VoteView>,
+    pub revealed_fool: Option<u32>,
+    pub last_words: Vec<u32>,
 }
 
 // ----- conversions from engine outcomes -------------------------------------
@@ -200,10 +253,30 @@ fn day_result(outcome: DayOutcome) -> DayResult {
         DayOutcome::Eliminated(id) => DayResult {
             kind: DayKind::Eliminated,
             eliminated: Some(seat(id)),
+            fool: None,
         },
         DayOutcome::Tied => DayResult {
             kind: DayKind::Tied,
             eliminated: None,
+            fool: None,
+        },
+        DayOutcome::FoolRevealed(id) => DayResult {
+            kind: DayKind::FoolRevealed,
+            eliminated: None,
+            fool: Some(seat(id)),
+        },
+    }
+}
+
+fn sheriff_result(outcome: SheriffOutcome) -> SheriffResult {
+    match outcome {
+        SheriffOutcome::Elected(id) => SheriffResult {
+            kind: SheriffKind::Elected,
+            sheriff: Some(seat(id)),
+        },
+        SheriffOutcome::Tied => SheriffResult {
+            kind: SheriffKind::Tied,
+            sheriff: None,
         },
     }
 }
@@ -241,6 +314,8 @@ pub enum GameErrorCode {
     AlreadyActed,
     NoMajority,
     ActionsIncomplete,
+    CannotVote,
+    NoLastWords,
     GameOver,
 }
 
@@ -264,6 +339,8 @@ impl From<&GameError> for GameErrorCode {
             GameError::AlreadyActed(_) => GameErrorCode::AlreadyActed,
             GameError::NoMajority => GameErrorCode::NoMajority,
             GameError::ActionsIncomplete { .. } => GameErrorCode::ActionsIncomplete,
+            GameError::CannotVote(_) => GameErrorCode::CannotVote,
+            GameError::NoLastWords(_) => GameErrorCode::NoLastWords,
             GameError::GameOver => GameErrorCode::GameOver,
         }
     }
@@ -308,6 +385,40 @@ impl Game {
         let roles: Vec<EngineRole> = roles.into_iter().map(Into::into).collect();
         Engine::with_roles(&roles)
             .map(|inner| Game { inner })
+            .map_err(to_js)
+    }
+
+    /// Build a game from an exact role list under `ruleset`; structured rosters must match the 12-player deal.
+    #[napi(factory)]
+    pub fn with_ruleset(roles: Vec<Role>, ruleset: Ruleset) -> napi::Result<Self> {
+        let roles: Vec<EngineRole> = roles.into_iter().map(Into::into).collect();
+        Engine::with_ruleset(&roles, ruleset.into())
+            .map(|inner| Game { inner })
+            .map_err(to_js)
+    }
+
+    /// Record or replace `voter`'s sheriff vote for `candidate`.
+    #[napi]
+    pub fn sheriff_vote(&mut self, voter: u32, candidate: u32) -> napi::Result<()> {
+        self.inner
+            .sheriff_vote(PlayerId(voter as usize), PlayerId(candidate as usize))
+            .map_err(to_js)
+    }
+
+    /// Resolve the sheriff election and begin Day 1.
+    #[napi]
+    pub fn resolve_sheriff(&mut self) -> napi::Result<SheriffResult> {
+        self.inner
+            .resolve_sheriff()
+            .map(sheriff_result)
+            .map_err(to_js)
+    }
+
+    /// Spend a Night 1 victim's one chance at last words.
+    #[napi]
+    pub fn last_words(&mut self, player: u32) -> napi::Result<()> {
+        self.inner
+            .last_words(PlayerId(player as usize))
             .map_err(to_js)
     }
 
@@ -415,10 +526,13 @@ impl Game {
                 id: seat(p.id()),
                 role: p.role().into(),
                 alive: p.is_alive(),
+                can_vote: e.can_vote(p.id()),
+                vote_weight: e.vote_weight(p.id()),
             })
             .collect();
         let (villagers, wolves) = e.alive_count_by_role();
         GameState {
+            ruleset: e.ruleset().into(),
             phase: e.phase().into(),
             round: e.round() as u32,
             winner: e.winner().map(Into::into),
@@ -437,6 +551,10 @@ impl Game {
             witch_victim: e.witch_victim().map(seat),
             alive_villagers: villagers as u32,
             alive_wolves: wolves as u32,
+            sheriff: e.sheriff().map(seat),
+            sheriff_votes: votes_to_views(e.current_sheriff_votes()),
+            revealed_fool: e.revealed_fool().map(seat),
+            last_words: e.pending_last_words().into_iter().map(seat).collect(),
         }
     }
 }

@@ -39,6 +39,10 @@ pub enum GameError {
     NoMajority,
     /// Resolution was attempted before every required actor had acted.
     ActionsIncomplete { waiting_on: Vec<PlayerId> },
+    /// A revealed Fool tried to vote.
+    CannotVote(PlayerId),
+    /// This player has no last words to share.
+    NoLastWords(PlayerId),
     /// The game is over; no further commands are accepted.
     GameOver,
 }
@@ -82,6 +86,8 @@ impl fmt::Display for GameError {
             GameError::ActionsIncomplete { waiting_on } => {
                 write!(f, "still waiting on {waiting_on:?}")
             }
+            GameError::CannotVote(id) => write!(f, "player {id} has lost their vote"),
+            GameError::NoLastWords(id) => write!(f, "player {id} has no last words to share"),
             GameError::GameOver => write!(f, "the game is over"),
         }
     }

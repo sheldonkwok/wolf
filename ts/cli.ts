@@ -6,6 +6,7 @@ import {
   botDayInspection,
   botDayVotes,
   botNightActions,
+  botSheriffVotes,
   isWolf,
   livingIds,
   livingWolves,
@@ -330,17 +331,19 @@ export class Table {
       );
     }
 
+    if (!(await this.runLastWords())) return false;
     const alive = livingIds(this.state()).map(nameOf);
     console.log(`Alive: ${alive.join(", ")}`);
     if (!(await this.runDayInspection())) return false;
 
+    const sheriff = this.state().sheriff;
     console.log(
-      `${this.state().majorityRequired} votes eliminate a player immediately. Otherwise, once everyone votes, the unique leader is eliminated; a top tie eliminates no one. Votes can change until the ballot closes.`,
+      `${this.state().majorityRequired} votes eliminate a player immediately. Otherwise, once everyone votes, the unique leader is eliminated; a top tie eliminates no one. Votes can change until the ballot closes.${sheriff == null ? "" : ` Sheriff ${nameOf(sheriff)}'s vote counts 1.5.`}`,
     );
     const ready = () => ballotClosed(this.state());
     while (!ready()) {
       let myVote: number | null = null;
-      if (this.iAmAlive()) {
+      if (this.state().players[this.me]!.canVote) {
         const picked = await this.promptPlayer("Who do you vote for?", livingIds(this.state()));
         if (picked === null) return false;
         myVote = picked;
@@ -357,11 +360,56 @@ export class Table {
       console.log(
         `${nameOf(outcome.eliminated)} was eliminated. (${roleTag(this.game.roleOf(outcome.eliminated))})`,
       );
+    } else if (outcome.kind === "FoolRevealed") {
+      console.log(`${nameOf(outcome.fool)} is the Fool! They stay in the game but can no longer vote.`);
     } else {
       console.log("The vote is tied. No one was eliminated; night falls.");
     }
 
     if (!this.iAmAlive()) await this.waitForEnter();
+    return true;
+  }
+
+  // The structured game's opening election; the winner's day votes count 1.5.
+  private async runSheriff(): Promise<boolean> {
+    this.drawBanner("Sheriff election");
+    console.log(
+      `Elect a sheriff whose day vote counts 1.5. ${this.state().majorityRequired} votes elect immediately; otherwise the unique leader wins once everyone votes, and a tie means no sheriff.`,
+    );
+    const ready = () => ballotClosed(this.state());
+    while (!ready()) {
+      const picked = await this.promptPlayer("Who do you vote for as sheriff?", livingIds(this.state()));
+      if (picked === null) return false;
+      this.game.sheriffVote(this.me, picked);
+      console.log(`${nameOf(this.me)} → ${nameOf(picked)}`);
+      if (ready()) break;
+      botSheriffVotes(this.game, this.rng, this.isBot, picked, (voter, candidate) =>
+        console.log(`${nameOf(voter)} → ${nameOf(candidate)}`),
+      );
+    }
+    const outcome = this.game.resolveSheriff();
+    console.log(
+      outcome.kind === "Elected"
+        ? `${nameOf(outcome.sheriff)} is the sheriff.`
+        : "The sheriff vote is tied. There is no sheriff this game.",
+    );
+    return true;
+  }
+
+  // Night 1 victims of a structured game share their last words before the vote.
+  private async runLastWords(): Promise<boolean> {
+    for (const id of this.state().lastWords) {
+      if (id === this.me) {
+        console.log("You were eliminated on the first night. Share your last words:");
+        process.stdout.write("> ");
+        const words = await this.reader.next();
+        if (words === null || words === undefined) return false;
+        console.log(`${nameOf(id)}'s last words: ${words}`);
+      } else {
+        console.log(`${nameOf(id)} shares their last words.`);
+      }
+      this.game.lastWords(id);
+    }
     return true;
   }
 
@@ -405,7 +453,8 @@ export class Table {
     while (!this.state().isOver) {
       const phase = this.state().phase;
       let step: boolean;
-      if (phase === "Night") step = await this.runNight();
+      if (phase === "Sheriff") step = await this.runSheriff();
+      else if (phase === "Night") step = await this.runNight();
       else if (phase === "Day") step = await this.runDay();
       else if (phase === "Hunter") step = await this.runHunter();
       else break;

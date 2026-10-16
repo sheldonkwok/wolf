@@ -33,7 +33,10 @@ function playOut(game: Game): void {
   for (let i = 0; i < cap; i++) {
     const s = game.state();
     if (s.phase === "Ended") return;
-    if (s.phase === "Hunter") {
+    if (s.phase === "Sheriff") {
+      for (const voter of s.players) game.sheriffVote(voter.id, 0);
+      expect(game.resolveSheriff()).toEqual({ kind: "Elected", sheriff: 0 });
+    } else if (s.phase === "Hunter") {
       game.hunterAction(s.pendingActors[0]!, s.players.find((p) => p.alive)!.id);
     } else if (s.phase === "Night") {
       const victim = s.players.find((p) => p.alive && p.role !== "Werewolf")!.id;

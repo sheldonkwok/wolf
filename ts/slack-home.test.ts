@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 import type { App } from "@slack/bolt";
 import manifest from "../slack/manifest.json";
-import { votingRules } from "./slack/copy.js";
+import { structuredRules, votingRules } from "./slack/copy.js";
 import { registerHome } from "./slack/home.js";
 
 test("Home is enabled and subscribed in the manifest", () => {
@@ -36,7 +36,7 @@ test("opening Home publishes instructions only for the configured workspace and 
   expect(JSON.stringify(published[0])).toContain("<#C1>");
   expect(JSON.stringify(published[0])).toContain("<@B1>");
   const page = JSON.stringify(published[0]);
-  for (const role of ["Villagers", "Werewolves", "Doctor", "Seer", "Hunter", "Witch"]) {
+  for (const role of ["Villagers", "Werewolves", "Doctor", "Seer", "Hunter", "Witch", "Fool"]) {
     expect(page).toContain(`${role}:* `);
   }
   expect(page).toContain("*Role selection*");
@@ -60,6 +60,16 @@ test("opening Home publishes instructions only for the configured workspace and 
   expect(page).toContain("once all living players vote, the unique leader (plurality) is eliminated");
   expect(page).toContain("a tie for the most votes eliminates nobody. Night then begins");
   expect(page).toContain("change your vote until a majority is reached or everyone has voted");
+  expect(page).toContain("*12-player structured rules*");
+  expect(page).toContain(structuredRules());
+  expect(page).toContain("4 Werewolves, 4 Villagers, a Seer, a Witch, a Hunter, and a Fool");
+  expect(page).toContain("`@werewolf sheriff @player`");
+  expect(page).toContain("day vote counts as 1.5 votes");
+  expect(page).toContain("`@werewolf last words <message>`");
+  expect(page).toContain("12-player games first elect a sheriff");
+  expect(page).toContain("they reveal their card and stay in the game but can no longer vote");
+  expect(page).toContain("the Witch, and the Fool win together");
+  expect(page).toContain("With exactly 12 players, the game uses Chinese structured rules instead");
   expect(page).toContain("*Winning*");
   expect(page).toContain("*Lifetime stats*");
   expect(page).toContain("DM `stats` for your wins, losses, and games played by team");

@@ -16,11 +16,12 @@
 | **Seer** | 0 or 1, chosen from the special-role pool |
 | **Hunter** | 0 or 1, chosen from the special-role pool |
 | **Witch** | 0 or 1, chosen from the special-role pool |
+| **Fool** | 1 in 12-player games only |
 | **Villager** | All remaining seats |
 
 ---
 
-For the chat game, the engine is the moderator and does not take a seat. Games have at least 5 players and `max(1, player_count / 3)` Werewolves (rounded down). Among the non-Werewolf players, up to `max(2, floor(village_count × 33%))` receive special roles, chosen randomly without replacement from Doctor, Seer, Hunter, and Witch. If all four fit, all are included; remaining seats are ordinary Villagers.
+For the chat game, the engine is the moderator and does not take a seat. Games have at least 5 players and `max(1, player_count / 3)` Werewolves (rounded down). Among the non-Werewolf players, up to `max(2, floor(village_count × 33%))` receive special roles, chosen randomly without replacement from Doctor, Seer, Hunter, and Witch. If all four fit, all are included; remaining seats are ordinary Villagers. With exactly 12 players, the game uses Chinese structured rules instead: 4 Werewolves, 4 Villagers, a Seer, a Witch, a Hunter, and a Fool.
 
 ## The Roles Explained
 
@@ -30,8 +31,9 @@ For the chat game, the engine is the moderator and does not take a seat. Games h
 * 🔮 **Seer:** The detective. May inspect one living player privately during Day 1, their only daytime inspection, then wakes up each night to inspect one player. The Day 1 inspection is skipped if Day 1 ends first. The Moderator secretly reveals if that person is a Werewolf or innocent.
 * 🏹 **Hunter:** The village's last-shot defender. Has no night action, but when eliminated by a vote, the Werewolves, or the Witch's poison, chooses one living player to eliminate with a final shot.
 * 🧪 **Witch:** The potion-maker. Holds one healing potion and one poison for the whole game. Each night, after the Werewolves choose, she may heal their target, poison another player, or do nothing.
+* 🃏 **Fool:** The village's jester, dealt only in 12-player games. Has no night action. The first time the village votes them out, they reveal their card and stay in the game but can no longer vote. They die normally at night or if voted out again.
 
-The Doctor, Seer, Hunter, and Witch are all on the village team. Special roles are randomly selected, so not every game includes every role.
+The Doctor, Seer, Hunter, Witch, and Fool are all on the village team. Special roles are randomly selected, so not every game includes every role.
 
 ---
 
@@ -52,9 +54,19 @@ The **Witch** is on the village team and replaces one Villager in the chat roste
 * **A night can eliminate two players:** the Werewolves' target and the poisoned player. The morning report names who died but never how.
 * A Witch attacked by the Werewolves still takes her turn that night. A Witch who is dead, or who has spent both potions, has no turn and the night resolves without waiting.
 
+### Chinese Structured Rules (12 Players)
+
+A game with exactly **12 players** always deals 4 Werewolves, 4 Villagers, a Seer, a Witch, a Hunter, and a Fool, and adds three rules:
+
+* **Sheriff election:** Before Day 1, every living player votes in the game channel with **`@werewolf sheriff @player`**; anyone may be elected, including yourself. The election resolves like a day vote: more than half of the living players electing one player ends it early; otherwise, once everyone has voted, the unique leader becomes sheriff. A tie means the game has no sheriff. Votes can change until the election resolves. Day 1 then begins.
+* **Sheriff's vote:** The sheriff's day vote counts as **1.5 votes**, both toward an early majority and in the final count. The badge is lost when the sheriff dies or is revealed as the Fool; nobody inherits it.
+* **Last words:** Players eliminated on Night 1, by the Werewolves or the Witch's poison, may share their final deductions once with **`@werewolf last words <message>`** in the game channel before Day 2 ends. Players eliminated later have no last words.
+
+The Fool is voted out like anyone else, but survives the first time: their role is revealed, nobody is eliminated, and night begins. A revealed Fool keeps talking but no longer votes or counts toward the majority.
+
 ## How to Play
 
-After roles are assigned privately, **the game starts immediately on Day 1**. Public messages do not reveal whether a Seer exists or has acted.
+After roles are assigned privately, **the game starts immediately on Day 1**, except that a 12-player game first holds its sheriff election. Public messages do not reveal whether a Seer exists or has acted.
 
 **Day 1 Seer action:** If present, the Seer may use DM dropdowns to inspect one living player (including themselves) at any time during Day 1, alongside discussion and voting. This is the **only time the Seer can inspect during the day**. Only the Seer receives whether that player is a Werewolf or innocent, not the exact innocent role. The choice is final and does not affect the vote. If Day 1 ends before the Seer acts, the Day 1 inspection is skipped with no public announcement. DM `status` recovers the Seer's private inspection history, labeled **Day 1** or **Night N**, and any current prompt.
 
@@ -70,8 +82,8 @@ Play alternates **Day 1 → Night 1 → Day 2 → Night 2**, until one team wins
 3. **Town Discussion:** Players discuss who seems suspicious, who might be lying, or what clues were spotted. Voting is available throughout the day, including Day 1.
 4. **The Vote:**
    * In the game channel, a living player votes with **`@werewolf vote @player`**, mentioning the player they suspect.
-   * Each living player has one vote. Repeating the command with a different target changes that vote until the day resolves.
-   * As soon as **more than half of the living players** vote for the same player (for example, 4 of 7 or 4 of 6), that player is eliminated and their role is revealed. There is no need to wait for everyone to vote.
+   * Each living player has one vote. Repeating the command with a different target changes that vote until the day resolves. In a 12-player game, the sheriff's vote counts as 1.5 and a revealed Fool cannot vote.
+   * As soon as **more than half of the living players** vote for the same player (for example, 4 of 7 or 4 of 6), that player is eliminated and their role is revealed. There is no need to wait for everyone to vote. A revealed Fool does not count toward the living players needed.
    * Otherwise, as soon as **every living player has voted**, the player with the **most votes** is eliminated and their role is revealed, even without a majority.
    * If two or more players tie for the most votes after everyone has voted, **nobody is eliminated** and night begins. A tie does not trigger a Hunter shot.
    * Until a majority is reached or everyone has voted, discussion and vote changes remain open. Votes reset each day.
@@ -101,7 +113,7 @@ After the night actions resolve, check for a winner. If the game continues, begi
 
 ## How to Win
 
-* 🧑‍🌾 **Village Team Wins:** When all Werewolves have been successfully eliminated! Villagers, the Doctor, the Seer, the Hunter, and the Witch win together.
+* 🧑‍🌾 **Village Team Wins:** When all Werewolves have been successfully eliminated! Villagers, the Doctor, the Seer, the Hunter, the Witch, and the Fool win together.
 * 🐺 **Werewolves Win:** When the number of living Werewolves equals or exceeds the number of all other living players, including special village roles.
 
 All of a night's eliminations happen together at dawn, before either victory condition is checked; poisoning the last Werewolf wins the game for the village even if the pack's attack also lands. If the Hunter has a final shot pending, resolve it before checking either victory condition.

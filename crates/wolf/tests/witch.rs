@@ -742,6 +742,7 @@ fn progress(g: &mut Engine, rng: &mut SplitMix64) -> Result<Option<NightOutcome>
             .hunter_action(pending[0], pick(rng, &alive))
             .map(|()| None),
         Phase::Ended => Ok(None),
+        Phase::Sheriff => unreachable!("standard games have no sheriff election"),
     }
 }
 
@@ -803,7 +804,7 @@ fn check_state(g: &Engine, context: &str) {
             assert_eq!(g.role_of(pending[0]), Ok(H), "{context}");
             assert!(!g.is_alive(pending[0]), "{context}");
         }
-        Phase::Day | Phase::Night => {
+        Phase::Day | Phase::Night | Phase::Sheriff => {
             assert_eq!(g.winner(), None, "{context}");
             assert!(
                 wolves > 0 && wolves < villagers,

@@ -2,6 +2,7 @@ import { expect, test } from "bun:test";
 import { type FinishedGame, openStats } from "./db/index.js";
 import { gamePlayers, games } from "./db/schema.js";
 import { Lobby } from "./lobby.js";
+import { structuredRules } from "./slack/copy.js";
 import { SlackDelivery } from "./slack/delivery.js";
 import { SlackGame, type SlackInput, type SlackMessage } from "./slack/game.js";
 import { messageBlocks, slackArgs, slackChannel, slackConfig, slackErrorMessage } from "./slackbot.js";
@@ -41,10 +42,21 @@ function table(count = 8, seed = 2n, dev = false, recordResult?: (result: Finish
   for (let seat = 0; seat < count; seat++) command("join", `U${seat}`);
   const vote = (seat: number, target: number) =>
     command(dev ? `vote ${target + 1}` : `vote <@U${target}>`, `U${seat}`);
-  return { bot, lobby, messages, receive, command, dm, choose, value, vote };
+  const sheriff = (seat: number, target: number) => command(`sheriff <@U${target}>`, `U${seat}`);
+  return { bot, lobby, messages, receive, command, dm, choose, value, vote, sheriff };
+}
+
+// Every player elects seat 0 so a structured game reaches Day 1.
+function elect(t: ReturnType<typeof table>) {
+  if (t.lobby.game!.state().phase !== "Sheriff") return;
+  for (const player of t.lobby.game!.state().players) {
+    if (t.lobby.game!.state().phase === "Sheriff") t.sheriff(player.id, 0);
+  }
+  expect(t.lobby.game!.state().phase).toBe("Day");
 }
 
 function reachNight(t: ReturnType<typeof table>) {
+  elect(t);
   eliminate(t, t.lobby.game!.state().players.findLast((p) => p.alive && p.role === "Villager")!.id);
   expect(t.lobby.game!.state().phase).toBe("Night");
   expect(t.lobby.game!.state().round).toBe(1);
@@ -54,6 +66,15 @@ function morning(t: ReturnType<typeof table>) {
   const state = t.lobby.game!.state();
   const target = state.players.find((p) => p.alive && p.role !== "Werewolf" && p.role !== "Hunter")!.id;
   for (const actor of state.pendingActors) {
+    if (state.players[actor]!.role === "Witch") {
+      const user = `U${actor}`;
+      const [prompt] = t.messages
+        .findLast((m) => m.user === user && m.choices)!
+        .choices![0]!.value.split(":");
+      const value = `${prompt}:${user}:pass`;
+      t.receive({ kind: "choice", user, channel: `D${user}`, value });
+      continue;
+    }
     const choice =
       state.players[actor]!.role === "Doctor"
         ? state.players.find((p) => p.alive && p.id !== target)!.id
@@ -697,7 +718,7 @@ test.each([
     const players = t.lobby.game!.state().players;
     expect(start[0]).toEqual({
       destination: "channel",
-      text: `The game has started with ${count} players. Teams: ${teams}. Roles are in your DMs.`,
+      text: `The game has started with ${count} players. Teams: ${teams}. Roles are in your DMs.${count === 12 ? ` ${structuredRules()}` : ""}`,
     });
     reachNight(t);
     const prompt = t.messages.findLast((m) => m.choices)!;

@@ -150,7 +150,12 @@ fn werewolf_count_scales_with_player_count() {
         );
         assert_eq!(g.players().len(), players);
         assert!(g.players().iter().all(|p| p.is_alive()));
-        assert_eq!(g.phase(), Phase::Day);
+        let opening = if players == 12 {
+            Phase::Sheriff
+        } else {
+            Phase::Day
+        };
+        assert_eq!(g.phase(), opening);
         assert_eq!(g.round(), 1);
         assert_eq!(g.winner(), None);
         assert!(!g.is_over());
@@ -162,7 +167,7 @@ fn special_village_roles_respect_the_cap_and_are_unique() {
     for (players, expected) in [
         (5, 2),
         (8, 2),
-        (12, 2),
+        (11, 2),
         (13, 2),
         (14, 3),
         (18, 3),

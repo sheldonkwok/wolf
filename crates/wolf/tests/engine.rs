@@ -123,6 +123,7 @@ fn play_out(g: &mut Engine, rng: &mut Rng, unanimous_town: bool) {
                 assert_winner_matches_survivors(g);
                 return;
             }
+            Phase::Sheriff => unreachable!("standard games have no sheriff election"),
         }
     }
     panic!("game did not end within the phase cap");

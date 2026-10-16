@@ -11,12 +11,14 @@ import {
   type PlayerView,
   Rng,
   type Role,
+  type Ruleset,
+  type SheriffResult,
   timeSeed,
   type VoteView,
   type Winner,
 } from "./native/index.js";
 
-export type { GameState, InspectionView, PlayerView, Role, VoteView, Winner };
+export type { GameState, InspectionView, PlayerView, Role, Ruleset, VoteView, Winner };
 export { MIN_PLAYERS, Rng, timeSeed };
 
 // Typed against the addon's generated union, so a code added in Rust fails typecheck until listed here.
@@ -38,6 +40,8 @@ const GAME_ERROR_CODES: Record<NativeGameErrorCode, true> = {
   AlreadyActed: true,
   NoMajority: true,
   ActionsIncomplete: true,
+  CannotVote: true,
+  NoLastWords: true,
   GameOver: true,
 };
 
@@ -81,7 +85,12 @@ export type NightResolution =
   | { kind: "NoConsensus"; targets: number[] }
   | { kind: "AwaitingWitch" };
 
-export type DayResolution = { kind: "Eliminated"; eliminated: number } | { kind: "Tied" };
+export type DayResolution =
+  | { kind: "Eliminated"; eliminated: number }
+  | { kind: "FoolRevealed"; fool: number }
+  | { kind: "Tied" };
+
+export type SheriffResolution = { kind: "Elected"; sheriff: number } | { kind: "Tied" };
 
 function isSeat(value: unknown): value is number {
   return typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
@@ -111,7 +120,16 @@ function normalizeDay(result: DayResult): DayResolution {
   if (result?.kind === "Eliminated" && isSeat(result.eliminated)) {
     return { kind: "Eliminated", eliminated: result.eliminated };
   }
+  if (result?.kind === "FoolRevealed" && isSeat(result.fool))
+    return { kind: "FoolRevealed", fool: result.fool };
   throw new GameError("Unknown", "Invalid day resolution from native addon");
+}
+
+function normalizeSheriff(result: SheriffResult): SheriffResolution {
+  if (result?.kind === "Tied" && result.sheriff == null) return { kind: "Tied" };
+  if (result?.kind === "Elected" && isSeat(result.sheriff))
+    return { kind: "Elected", sheriff: result.sheriff };
+  throw new GameError("Unknown", "Invalid sheriff resolution from native addon");
 }
 
 export class Game {
@@ -127,6 +145,10 @@ export class Game {
 
   static withRoles(roles: Role[]): Game {
     return Game.fromNative(attempt(() => NativeGame.withRoles(roles)));
+  }
+
+  static withRuleset(roles: Role[], ruleset: Ruleset): Game {
+    return Game.fromNative(attempt(() => NativeGame.withRuleset(roles, ruleset)));
   }
 
   // Wrap an existing native instance without constructing a second game or consuming randomness.
@@ -174,6 +196,18 @@ export class Game {
 
   resolveDay(): DayResolution {
     return normalizeDay(attempt(() => this.inner.resolveDay()));
+  }
+
+  sheriffVote(voter: number, candidate: number): void {
+    attempt(() => this.inner.sheriffVote(voter, candidate));
+  }
+
+  resolveSheriff(): SheriffResolution {
+    return normalizeSheriff(attempt(() => this.inner.resolveSheriff()));
+  }
+
+  lastWords(player: number): void {
+    attempt(() => this.inner.lastWords(player));
   }
 
   roleOf(id: number): Role {

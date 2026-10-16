@@ -44,7 +44,7 @@ export function villagerBotVote(state: GameState, rng: Rng, myVote: number | nul
   return randomLivingOther(state, rng, bot);
 }
 
-// Whether the day can resolve: an early majority exists or every living player has voted.
+// Whether the day or sheriff ballot can resolve: an early majority exists or every eligible voter has voted.
 export function ballotClosed(state: GameState): boolean {
   return state.majorityTarget != null || state.pendingActors.length === 0;
 }
@@ -69,11 +69,33 @@ export function botDayVotes(
   const packLead = state.votes.find((v) => !isBot(v.voter) && isWolf(state, v.voter))?.target;
   const wolfTarget = packLead ?? randomLivingVillager(state, rng);
   for (const player of state.players) {
-    if (!player.alive || !isBot(player.id)) continue;
+    if (!player.canVote || !isBot(player.id)) continue;
     const target =
       !humansAlive || player.role === "Werewolf" ? wolfTarget : villagerBotVote(state, rng, lead, player.id);
     game.vote(player.id, target);
     onVote(player.id, target);
+    if (ballotClosed(game.state())) break;
+  }
+}
+
+// Cast bot sheriff votes in seat order: wolves back a packmate, others follow `lead` half the time.
+export function botSheriffVotes(
+  game: Game,
+  rng: Rng,
+  isBot: (seat: number) => boolean,
+  lead: number | null,
+  onVote: (voter: number, candidate: number) => void,
+): void {
+  const state = game.state();
+  for (const seat of state.pendingActors) {
+    if (!isBot(seat)) continue;
+    const candidate = isWolf(state, seat)
+      ? pick(rng, livingWolves(state))
+      : lead !== null && rng.chance(50)
+        ? lead
+        : pick(rng, livingIds(state));
+    game.sheriffVote(seat, candidate);
+    onVote(seat, candidate);
     if (ballotClosed(game.state())) break;
   }
 }

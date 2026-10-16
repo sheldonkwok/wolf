@@ -4,8 +4,10 @@
 import { expect, spyOn, test } from "bun:test";
 
 import {
+  ballotClosed,
   botDayVotes,
   botNightActions,
+  botSheriffVotes,
   botWitchAction,
   livingIds,
   pick,
@@ -13,7 +15,7 @@ import {
   randomLivingVillager,
   villagerBotVote,
 } from "./bots.js";
-import { Game, type GameState, Rng } from "./engine.js";
+import { Game, type GameState, Rng, type Role } from "./engine.js";
 
 // Wolves at seats 0 and 5, villagers elsewhere — no one eliminated.
 function roster(): GameState {
@@ -177,4 +179,36 @@ test("a bot witch never poisons herself and only heals a victim she can see", ()
   for (let n = 0; n < 500; n++)
     botWitchAction(game, { ...state, witchVictim: undefined, poisonAvailable: false }, rng, 1);
   expect(poison).not.toHaveBeenCalled();
+});
+
+test("bot sheriff votes close the election, wolves back a packmate, and a revealed Fool never votes by day", () => {
+  const roles = [
+    ...Array<Role>(4).fill("Werewolf"),
+    ...Array<Role>(4).fill("Villager"),
+    "Seer",
+    "Witch",
+    "Hunter",
+    "Fool",
+  ] as Role[];
+  const everyone = () => true;
+  for (let seed = 0n; seed < 50n; seed++) {
+    const game = Game.withRuleset(roles, "Structured");
+    const rng = new Rng(seed);
+    const votes: Array<[number, number]> = [];
+    botSheriffVotes(game, rng, everyone, 8, (voter, candidate) => votes.push([voter, candidate]));
+    expect(ballotClosed(game.state())).toBe(true);
+    for (const [voter, candidate] of votes) if (voter < 4) expect(candidate).toBeLessThan(4);
+    game.resolveSheriff();
+    for (const player of game.state().players) game.vote(player.id, 11);
+    expect(game.resolveDay()).toEqual({ kind: "FoolRevealed", fool: 11 });
+    for (let wolf = 0; wolf < 4; wolf++) game.nightAction(wolf, 4);
+    game.seerAction(8, 0);
+    game.resolveNight();
+    game.witchPass(9);
+    game.resolveNight();
+    const voters: number[] = [];
+    botDayVotes(game, rng, everyone, null, (voter) => voters.push(voter));
+    expect(voters).not.toContain(11);
+    expect(ballotClosed(game.state())).toBe(true);
+  }
 });
