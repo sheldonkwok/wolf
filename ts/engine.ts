@@ -114,8 +114,15 @@ function normalizeDay(result: DayResult): DayResolution {
   throw new GameError("Unknown", "Invalid day resolution from native addon");
 }
 
+// A successful state-changing call as `[method, ...seats]`; replaying a game's log rebuilds it exactly.
+export type GameAction =
+  | ["nightAction" | "doctorAction" | "seerAction" | "witchPoison" | "hunterAction" | "vote", number, number]
+  | ["witchHeal" | "witchPass", number]
+  | ["resolveNight" | "resolveDay"];
+
 export class Game {
   private inner: NativeGame;
+  private log: GameAction[] = [];
 
   constructor(playerCount: number) {
     this.inner = attempt(() => new NativeGame(playerCount));
@@ -129,51 +136,64 @@ export class Game {
     return Game.fromNative(attempt(() => NativeGame.withRoles(roles)));
   }
 
+  // Re-deal `roles` and re-apply `history`; the engine draws randomness only when dealing, so this is exact.
+  static replay(roles: Role[], history: readonly GameAction[]): Game {
+    const game = Game.withRoles(roles);
+    for (const action of history) game.apply(action);
+    return game;
+  }
+
   // Wrap an existing native instance without constructing a second game or consuming randomness.
   private static fromNative(inner: NativeGame): Game {
     const game = Object.create(Game.prototype) as Game;
     game.inner = inner;
+    game.log = [];
     return game;
   }
 
+  // Every successful state-changing call so far, in order.
+  get history(): readonly GameAction[] {
+    return this.log;
+  }
+
   nightAction(wolf: number, target: number): void {
-    attempt(() => this.inner.nightAction(wolf, target));
+    this.record(["nightAction", wolf, target], () => this.inner.nightAction(wolf, target));
   }
 
   doctorAction(doctor: number, target: number): void {
-    attempt(() => this.inner.doctorAction(doctor, target));
+    this.record(["doctorAction", doctor, target], () => this.inner.doctorAction(doctor, target));
   }
 
   seerAction(seer: number, target: number): InspectionView {
-    return attempt(() => this.inner.seerAction(seer, target));
+    return this.record(["seerAction", seer, target], () => this.inner.seerAction(seer, target));
   }
 
   witchHeal(witch: number): void {
-    attempt(() => this.inner.witchHeal(witch));
+    this.record(["witchHeal", witch], () => this.inner.witchHeal(witch));
   }
 
   witchPoison(witch: number, target: number): void {
-    attempt(() => this.inner.witchPoison(witch, target));
+    this.record(["witchPoison", witch, target], () => this.inner.witchPoison(witch, target));
   }
 
   witchPass(witch: number): void {
-    attempt(() => this.inner.witchPass(witch));
+    this.record(["witchPass", witch], () => this.inner.witchPass(witch));
   }
 
   hunterAction(hunter: number, target: number): void {
-    attempt(() => this.inner.hunterAction(hunter, target));
+    this.record(["hunterAction", hunter, target], () => this.inner.hunterAction(hunter, target));
   }
 
   resolveNight(): NightResolution {
-    return normalizeNight(attempt(() => this.inner.resolveNight()));
+    return normalizeNight(this.record(["resolveNight"], () => this.inner.resolveNight()));
   }
 
   vote(voter: number, target: number): void {
-    attempt(() => this.inner.vote(voter, target));
+    this.record(["vote", voter, target], () => this.inner.vote(voter, target));
   }
 
   resolveDay(): DayResolution {
-    return normalizeDay(attempt(() => this.inner.resolveDay()));
+    return normalizeDay(this.record(["resolveDay"], () => this.inner.resolveDay()));
   }
 
   roleOf(id: number): Role {
@@ -186,5 +206,40 @@ export class Game {
 
   state(): GameState {
     return attempt(() => this.inner.state());
+  }
+
+  private record<T>(action: GameAction, call: () => T): T {
+    const result = attempt(call);
+    this.log.push(action);
+    return result;
+  }
+
+  // Validated because replayed actions come from storage rather than typed callers.
+  private apply(action: GameAction): void {
+    const [method, actor, target] = action as [string, unknown, unknown];
+    const seat = (value: unknown): number => {
+      if (!isSeat(value)) throw new GameError("Unknown", `Invalid seat in stored action ${method}`);
+      return value;
+    };
+    switch (method) {
+      case "nightAction":
+      case "doctorAction":
+      case "seerAction":
+      case "witchPoison":
+      case "hunterAction":
+      case "vote":
+        this[method](seat(actor), seat(target));
+        break;
+      case "witchHeal":
+      case "witchPass":
+        this[method](seat(actor));
+        break;
+      case "resolveNight":
+      case "resolveDay":
+        this[method]();
+        break;
+      default:
+        throw new GameError("Unknown", `Unknown stored action ${String(method)}`);
+    }
   }
 }

@@ -1,7 +1,7 @@
 // The pre-game roster: people join in order, the first is the host, and only the
 // host may start the engine the lobby then owns. Ported from the old Rust `wolf::Lobby`.
 
-import { Game, MIN_PLAYERS } from "./engine.js";
+import { Game, type GameAction, MIN_PLAYERS, type Role } from "./engine.js";
 
 // An opaque platform user handle, such as a Slack or Discord user id; the key that identifies a member.
 export type UserId = string;
@@ -10,6 +10,12 @@ export type UserId = string;
 export interface Member {
   readonly user: UserId;
   readonly name: string;
+}
+
+// Plain data that rebuilds a lobby, including a running game as its deal and action log.
+export interface LobbySnapshot {
+  members: Member[];
+  game: { roles: Role[]; history: GameAction[] } | null;
 }
 
 // Whether the lobby is still gathering players or has a game running.
@@ -100,7 +106,36 @@ export class Lobby {
     this.running = null;
   }
 
+  // Replace this lobby's roster and game with `snapshot`; on throw the lobby is unchanged.
+  restore(snapshot: LobbySnapshot): void {
+    const members = snapshot.members.map(({ user, name }) => {
+      if (typeof user !== "string" || typeof name !== "string")
+        throw new Error("Invalid stored lobby member");
+      return { user, name };
+    });
+    if (members.length > Lobby.MAX_PLAYERS || new Set(members.map((m) => m.user)).size !== members.length)
+      throw new Error("Invalid stored lobby roster");
+    const game = snapshot.game ? Game.replay(snapshot.game.roles, snapshot.game.history) : null;
+    if (game && game.state().players.length !== members.length)
+      throw new Error("Stored game does not match the lobby roster");
+    this.roster.splice(0, this.roster.length, ...members);
+    this.running = game;
+  }
+
   // ----- inspection -----------------------------------------------------
+
+  // Everything needed to rebuild this lobby with restore.
+  snapshot(): LobbySnapshot {
+    return {
+      members: this.roster.map(({ user, name }) => ({ user, name })),
+      game: this.running
+        ? {
+            roles: this.running.state().players.map((p) => p.role),
+            history: this.running.history.map((action) => [...action] as GameAction),
+          }
+        : null,
+    };
+  }
 
   // Whether the lobby is waiting for players or running a game.
   get state(): LobbyState {

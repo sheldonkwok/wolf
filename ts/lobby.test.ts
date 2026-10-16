@@ -279,3 +279,47 @@ test("the lobby maps every seat to the right member through a whole game", () =>
     }
   }
 });
+
+// ----- snapshot & restore ---------------------------------------------
+
+test("a waiting lobby round-trips through a JSON snapshot", () => {
+  const lobby = lobbyWith(3);
+  const restored = new Lobby();
+  restored.restore(JSON.parse(JSON.stringify(lobby.snapshot())));
+  expect(restored.members).toEqual(lobby.members);
+  expect(restored.state).toBe("Waiting");
+  expect(restored.isHost("u0")).toBe(true);
+});
+
+test("a running game round-trips mid-game and can be played to the end", () => {
+  const lobby = lobbyWith(7);
+  const game = lobby.startWithSeed("u0", 100n);
+  const living = game.state().players.map((p) => p.id);
+  for (const voter of living.slice(0, 4)) game.vote(voter, 6);
+  const restored = new Lobby();
+  restored.restore(JSON.parse(JSON.stringify(lobby.snapshot())));
+  expect(restored.state).toBe("InGame");
+  expect(restored.game!.state()).toEqual(game.state());
+  playOut(restored.game!);
+  restored.endGame();
+  expect(restored.state).toBe("Waiting");
+  expect(restored.size).toBe(7);
+});
+
+test("restoring a malformed snapshot throws and leaves the lobby unchanged", () => {
+  const lobby = lobbyWith(5);
+  const valid = lobbyWith(5);
+  valid.startWithSeed("u0", 1n);
+  const good = valid.snapshot();
+  const bad = [
+    { ...good, members: [...good.members, good.members[0]!] },
+    { ...good, members: good.members.slice(1) },
+    { ...good, game: { ...good.game!, history: [["resolveNight"]] } },
+    { members: [{ user: 1, name: "x" }], game: null },
+  ];
+  for (const snapshot of bad) {
+    expect(() => lobby.restore(snapshot as never)).toThrow();
+    expect(lobby.members.map((m) => m.user)).toEqual(["u0", "u1", "u2", "u3", "u4"]);
+    expect(lobby.state).toBe("Waiting");
+  }
+});

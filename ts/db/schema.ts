@@ -37,3 +37,15 @@ export const gamePlayers = sqliteTable(
     check("game_players_seat", sql`${table.seat} >= 0`),
   ],
 );
+
+// The live lobby per channel, so a restart resumes the roster and any running game.
+export const lobbies = sqliteTable(
+  "lobbies",
+  {
+    workspaceId: text("workspace_id").notNull(),
+    channelId: text("channel_id").notNull(),
+    state: text("state", { mode: "json" }).notNull(),
+    updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.workspaceId, table.channelId] })],
+);

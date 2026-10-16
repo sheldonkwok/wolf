@@ -154,13 +154,24 @@ async function main(): Promise<void> {
 
   const dms = new Map<string, string>();
   const resolveChoiceNames = choiceNameResolver(app.client);
+  const game = new SlackGame(config.channel, undefined, {
+    ...args,
+    recordResult: (result) => stats.record(auth.team_id!, result),
+    playerStats: (user) => stats.personal(auth.team_id!, config.channel, user),
+    channelStats: () => stats.channel(auth.team_id!, config.channel),
+    saveState: (state) => stats.saveLobby(auth.team_id!, config.channel, state),
+  });
+  const saved = stats.loadLobby(auth.team_id, config.channel);
+  if (saved !== undefined) {
+    try {
+      game.restore(saved);
+      console.log(`Restored the saved lobby: ${game.lobby.size} players, ${game.lobby.state}.`);
+    } catch (error) {
+      console.error(`Discarded the saved lobby; starting fresh. ${slackErrorMessage(error)}`);
+    }
+  }
   const delivery = new SlackDelivery(
-    new SlackGame(config.channel, undefined, {
-      ...args,
-      recordResult: (result) => stats.record(auth.team_id!, result),
-      playerStats: (user) => stats.personal(auth.team_id!, config.channel, user),
-      channelStats: () => stats.channel(auth.team_id!, config.channel),
-    }),
+    game,
     async (message) => {
       let channel = config.channel;
       if (message.destination === "dm") {

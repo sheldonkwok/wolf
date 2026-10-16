@@ -128,6 +128,23 @@ export function openStats(path = process.env.DATABASE_PATH || "./data/wolf.sqlit
           .run();
       });
     },
+    loadLobby(workspaceId: string, channelId: string): unknown {
+      return db
+        .select({ state: schema.lobbies.state })
+        .from(schema.lobbies)
+        .where(and(eq(schema.lobbies.workspaceId, workspaceId), eq(schema.lobbies.channelId, channelId)))
+        .get()?.state;
+    },
+    saveLobby(workspaceId: string, channelId: string, state: unknown): void {
+      const updatedAt = new Date();
+      db.insert(schema.lobbies)
+        .values({ workspaceId, channelId, state, updatedAt })
+        .onConflictDoUpdate({
+          target: [schema.lobbies.workspaceId, schema.lobbies.channelId],
+          set: { state, updatedAt },
+        })
+        .run();
+    },
     close: () => sqlite.close(),
   };
 }

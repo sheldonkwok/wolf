@@ -25,6 +25,7 @@ export class SlackDelivery {
       .then(async () => {
         command();
         this.game.saveResults();
+        this.game.saveState();
         while (this.outbox.length > 0) {
           await this.send(this.outbox[0]!);
           this.outbox.shift();

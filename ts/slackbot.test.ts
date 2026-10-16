@@ -1120,3 +1120,83 @@ test("doctor saves are public without revealing the doctor and seer results rema
     expect(game.state().round).toBe(2);
   }
 });
+
+test("a restarted bot resumes a mid-night game from its snapshot and old dropdowns still work", () => {
+  const t = table(8, 2n);
+  t.command("start");
+  reachNight(t);
+  const state = t.lobby.game!.state();
+  const target = state.players.find((p) => p.alive && p.role === "Villager")!.id;
+  const [first, ...rest] = state.pendingActors;
+  t.choose(first!, target);
+  const restarted = new SlackGame("CGAME", new Lobby(), { seed: 2n });
+  restarted.restore(JSON.parse(JSON.stringify(t.bot.snapshot())));
+  expect(restarted.lobby.members).toEqual(t.lobby.members);
+  expect(restarted.lobby.game!.state()).toEqual(t.lobby.game!.state());
+  expect(restarted.snapshot()).toEqual(t.bot.snapshot());
+  const output: SlackMessage[] = [];
+  for (const seat of rest) {
+    const user = `U${seat}`;
+    const role = state.players[seat]!.role;
+    const choice = role === "Witch" ? undefined : t.value(user, role === "Doctor" ? seat : target);
+    output.push(
+      ...restarted.handle({
+        id: `restart-${seat}`,
+        kind: "choice",
+        user,
+        channel: `D${user}`,
+        value: choice!,
+      }),
+    );
+  }
+  expect(output.some((m) => m.destination === "channel" && m.text.startsWith("Day 2."))).toBe(true);
+  expect(restarted.lobby.game!.state().round).toBe(2);
+});
+
+test("lobby state is saved only when it changes and restored from SQLite", async () => {
+  const stats = openStats(":memory:");
+  try {
+    const writes: unknown[] = [];
+    const options = {
+      saveState: (state: unknown) => {
+        writes.push(state);
+        stats.saveLobby("TWORKSPACE", "CGAME", state);
+      },
+    };
+    const bot = new SlackGame("CGAME", new Lobby(), options);
+    const delivery = new SlackDelivery(
+      bot,
+      async () => {},
+      (error) => {
+        throw error;
+      },
+    );
+    await delivery.receive({ id: "1", kind: "mention", user: "U0", channel: "CGAME", text: "join" });
+    await delivery.receive({ id: "2", kind: "mention", user: "U1", channel: "CGAME", text: "join" });
+    await delivery.receive({ id: "3", kind: "mention", user: "U0", channel: "CGAME", text: "status" });
+    await delivery.retry();
+    expect(writes).toHaveLength(2);
+    const restarted = new SlackGame("CGAME", new Lobby(), options);
+    restarted.restore(stats.loadLobby("TWORKSPACE", "CGAME"));
+    expect(restarted.lobby.members.map((m) => m.user)).toEqual(["U0", "U1"]);
+    restarted.saveState();
+    expect(writes).toHaveLength(2);
+    for (const bad of [null, { version: 2 }, { ...restarted.snapshot(), game: { id: "x" } }]) {
+      expect(() => restarted.restore(bad)).toThrow();
+      expect(restarted.lobby.size).toBe(2);
+    }
+  } finally {
+    stats.close();
+  }
+});
+
+test("a restored dev game keeps its bots and dev flag even if the bot restarts without dev mode", () => {
+  const t = table(1, 2n, true);
+  t.command("start");
+  const restarted = new SlackGame("CGAME", new Lobby(), { seed: 2n });
+  restarted.restore(JSON.parse(JSON.stringify(t.bot.snapshot())));
+  expect(restarted.snapshot().game?.dev).toBe(true);
+  const game = restarted.lobby.game!;
+  restarted.handle({ id: "v", kind: "mention", user: "U0", channel: "CGAME", text: "vote <@U0>" });
+  expect(game.history.some(([method, voter]) => method === "vote" && voter !== 0)).toBe(true);
+});

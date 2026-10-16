@@ -450,3 +450,31 @@ test("a Witch with no potions left, or no longer alive, is never awaited", () =>
   expect(deadGame.resolveNight()).toEqual({ kind: "Dawn", saved: null, deaths: [2] });
   expect(deadGame.state()).toMatchObject({ healAvailable: true, poisonAvailable: true });
 });
+
+test("replaying a game's deal and history rebuilds the same state, logging only successful calls", () => {
+  const game = Game.withSeed(7, 100n);
+  expect(() => game.resolveNight()).toThrow(GameError);
+  reachNight(game);
+  const state = game.state();
+  for (const wolf of state.players.filter((p) => p.role === "Werewolf")) game.nightAction(wolf.id, 0);
+  expect(() => game.vote(0, 1)).toThrow(GameError);
+  const roles = game.state().players.map((p) => p.role);
+  expect(game.history.at(-1)?.[0]).toBe("nightAction");
+  expect(game.history.filter(([method]) => method === "resolveNight")).toEqual([]);
+  const replayed = Game.replay(roles, game.history);
+  expect(replayed.state()).toEqual(game.state());
+  expect(replayed.history).toEqual(game.history);
+  for (const seer of game.state().pendingActors)
+    expect(replayed.seerAction(seer, 1)).toEqual(game.seerAction(seer, 1));
+  expect(replayed.resolveNight()).toEqual(game.resolveNight());
+  expect(replayed.state()).toEqual(game.state());
+});
+
+test("replay rejects malformed stored actions", () => {
+  const roles = Game.withSeed(7, 100n)
+    .state()
+    .players.map((p) => p.role);
+  for (const history of [[["explode"]], [["vote", -1, 0]], [["vote", 0]], [["resolveNight"]]]) {
+    expect(() => Game.replay(roles, history as never)).toThrow(GameError);
+  }
+});

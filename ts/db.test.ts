@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { type FinishedGame, openStats } from "./db/index.js";
-import { gamePlayers, games } from "./db/schema.js";
+import { gamePlayers, games, lobbies } from "./db/schema.js";
 
 function result(): FinishedGame {
   return {
@@ -72,5 +72,31 @@ test("game and roster writes are atomic and invalid rosters can be retried", () 
     expect(stats.db.select().from(gamePlayers).all()).toHaveLength(5);
   } finally {
     stats.close();
+  }
+});
+
+test("the saved lobby is upserted per channel and survives reopening a SQLite file", () => {
+  const directory = mkdtempSync(join(tmpdir(), "wolf-lobby-"));
+  const path = join(directory, "wolf.sqlite");
+  try {
+    const stats = openStats(path);
+    try {
+      expect(stats.loadLobby("TWORKSPACE", "CGAME")).toBeUndefined();
+      stats.saveLobby("TWORKSPACE", "CGAME", { version: 1, members: ["U0"] });
+      stats.saveLobby("TWORKSPACE", "CGAME", { version: 1, members: ["U0", "U1"] });
+      stats.saveLobby("TWORKSPACE", "COTHER", { version: 1, members: [] });
+      expect(stats.db.select().from(lobbies).all()).toHaveLength(2);
+    } finally {
+      stats.close();
+    }
+    const reopened = openStats(path);
+    try {
+      expect(reopened.loadLobby("TWORKSPACE", "CGAME")).toEqual({ version: 1, members: ["U0", "U1"] });
+      expect(reopened.loadLobby("TOTHER", "CGAME")).toBeUndefined();
+    } finally {
+      reopened.close();
+    }
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
   }
 });

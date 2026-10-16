@@ -37,7 +37,7 @@ The bot publishes a welcome page when Slack sends `app_home_opened`. For an exis
 
 Starting a game sends private roles and choice prompts. Slack rejects these DMs when the installed app's Messages tab is disabled, even if channel replies work. In [Slack's app dashboard](https://api.slack.com/apps), select the app used by `SLACK_BOT_TOKEN`, open **App Home → Show Tabs**, enable **Messages Tab**, and allow users to send messages from that tab. Save changes. See [Slack's Messages tab setup](https://docs.slack.dev/surfaces/app-home/#enable-messages-tab).
 
-The repository manifest already sets `features.app_home.messages_tab_enabled` to `true` and `messages_tab_read_only_enabled` to `false`; changing the local file does not update an existing Slack app. Keep the bot process running while fixing the app settings: the queue retries every second and resumes delivery once Slack accepts DMs. Restarting loses the current game and queued messages, requiring players to rejoin and start again.
+The repository manifest already sets `features.app_home.messages_tab_enabled` to `true` and `messages_tab_read_only_enabled` to `false`; changing the local file does not update an existing Slack app. Keep the bot process running while fixing the app settings: the queue retries every second and resumes delivery once Slack accepts DMs. Restarting resumes the saved lobby and game but loses queued messages; players can DM `status` to get their role and current prompt again.
 
 ## Connected but no response to mentions
 
@@ -82,12 +82,16 @@ DM `stats` for your lifetime games played, wins, losses, and win rate, overall a
 
 Locally, `DATABASE_PATH` defaults to `./data/wolf.sqlite`; its parent directory is created automatically. The database and SQLite WAL sidecars are gitignored. Startup applies the committed migrations in `drizzle/` before accepting game commands. For schema changes, edit `ts/db/schema.ts`, run `bun run db:generate`, and commit the generated SQL and metadata. Do not edit migrations already deployed.
 
-Game and player records are committed in one transaction. A repeated save of the same game UUID is a no-op. Failed writes retain the result in memory and retry every second before sending queued messages. A restart before a successful write loses that pending result, just as it loses an active game. Completed, committed records survive restarts. Use SQLite's backup API or stop the bot before copying the database; copying only a live `.sqlite` file can miss data in the WAL.
+Game and player records are committed in one transaction. A repeated save of the same game UUID is a no-op. Failed writes retain the result in memory and retry every second before sending queued messages. Lobby state is saved only after any pending result, so a restart before a successful write resumes the game just before its final action instead of losing the result. Completed, committed records survive restarts. Use SQLite's backup API or stop the bot before copying the database; copying only a live `.sqlite` file can miss data in the WAL.
+
+## Lobby persistence
+
+The live lobby for the configured workspace and channel is saved to the `lobbies` table after every command that changes it, before any reply is sent, and restored on startup. It holds the roster, dev bots, the current dropdown token, and any running game. A running game is stored as its dealt roles plus the log of successful engine actions; the engine only uses randomness to deal, so replaying the log rebuilds the exact state, and dropdowns sent before the restart keep working. If a saved lobby cannot be restored, for example because an engine change makes the old log invalid, startup logs the reason and opens a fresh lobby. A dev game resumed without `--dev` keeps its bots and is still recorded as a dev game.
 
 ## Railway deployment
 
 1. Deploy this repository with the included `Dockerfile` and `railway.toml`.
-2. **Attach a persistent volume to the bot service with mount path `/data`** in Railway's dashboard (service → Volumes). The TOML file cannot provision the volume. Without it, the container filesystem is ephemeral and stats will be lost on redeploy.
+2. **Attach a persistent volume to the bot service with mount path `/data`** in Railway's dashboard (service → Volumes). The TOML file cannot provision the volume. Without it, the container filesystem is ephemeral and stats and the live lobby will be lost on redeploy.
 3. Set `SLACK_BOT_TOKEN`, `SLACK_APP_TOKEN`, and `SLACK_CHANNEL_ID` in Railway variables. The image defaults `DATABASE_PATH` to `/data/wolf.sqlite`; if you set it explicitly, use this absolute path, not the local `.env.example` path.
 4. Keep one replica, with overlapping deployments disabled as configured. The entrypoint gives the `bun` user ownership of the mounted directory and then drops root privileges before starting the bot. Migrations run at startup, after the volume is mounted, not during the image build.
 5. Enable Railway volume backups before accumulating game history. Do not delete the volume when redeploying or replacing the service.

@@ -9,7 +9,7 @@ import {
 } from "../bots.js";
 import type { ChannelStats, FinishedGame, PlayerStats } from "../db/index.js";
 import { GameError, Rng, timeSeed } from "../engine.js";
-import { Lobby, LobbyError } from "../lobby.js";
+import { Lobby, LobbyError, type LobbySnapshot } from "../lobby.js";
 import { verdict } from "../render.js";
 import { VOTE_COMMAND, votingRules, votingSummary } from "./copy.js";
 import { roleBlurb } from "./rules.js";
@@ -36,6 +36,15 @@ export type SlackInput = {
   channel: string;
 } & ({ kind: "mention" | "dm"; text: string } | { kind: "choice"; value: string });
 
+// Everything a restarted bot needs to resume this channel; stored as JSON.
+export interface SlackSnapshot {
+  version: 1;
+  lobby: LobbySnapshot;
+  bots: string[];
+  prompt: string;
+  game: { id: string; startedAt: number; dev: boolean } | null;
+}
+
 const HELP = `In the game channel: \`@werewolf join\`, \`leave\`, \`start\`, \`end\`, \`status\`, \`stats\`, \`vote @player\`, or \`help\`. The first player is host; only the host starts or ends games. Use \`@werewolf end\` to cancel the game and open a fresh lobby. During the day, vote publicly with ${VOTE_COMMAND}. ${votingRules()} Every game starts on Day 1. A Seer may privately inspect one player during Day 1 using DM dropdowns; if Day 1 ends first, that inspection is skipped. Use DM dropdowns for the Seer's Day 1 inspection, night actions, and the Hunter's final shot. DM \`status\` to get your role, inspection history, and current prompt again. DM \`stats\` for your lifetime wins, losses, and team breakdowns; use \`@werewolf stats\` in the channel for team win rates and the top 3 most frequent wolves. Stats count completed games in this channel, excluding dev games and bots.`;
 
 export class SlackGame {
@@ -45,8 +54,9 @@ export class SlackGame {
   private readonly bots = new Set<string>();
   private readonly rng: Rng;
   private readonly dev: boolean;
-  private currentGame: { id: string; startedAt: Date } | null = null;
+  private currentGame: { id: string; startedAt: Date; dev: boolean } | null = null;
   private readonly results: FinishedGame[] = [];
+  private savedState = "";
 
   constructor(
     readonly channel: string,
@@ -57,6 +67,7 @@ export class SlackGame {
       recordResult?: (result: FinishedGame) => void;
       playerStats?: (user: string) => PlayerStats;
       channelStats?: () => ChannelStats;
+      saveState?: (state: SlackSnapshot) => void;
     } = {},
   ) {
     this.dev = options.dev ?? false;
@@ -68,6 +79,50 @@ export class SlackGame {
       this.options.recordResult!(this.results[0]!);
       this.results.shift();
     }
+  }
+
+  // Persist the current snapshot if it changed since the last successful save.
+  saveState(): void {
+    if (!this.options.saveState) return;
+    const state = this.snapshot();
+    const json = JSON.stringify(state);
+    if (json === this.savedState) return;
+    this.options.saveState(state);
+    this.savedState = json;
+  }
+
+  snapshot(): SlackSnapshot {
+    return {
+      version: 1,
+      lobby: this.lobby.snapshot(),
+      bots: [...this.bots],
+      prompt: this.prompt,
+      game: this.currentGame && { ...this.currentGame, startedAt: this.currentGame.startedAt.getTime() },
+    };
+  }
+
+  // Resume from a stored snapshot; throws and leaves this game unchanged if it is malformed.
+  restore(stored: unknown): void {
+    const state = stored as SlackSnapshot;
+    const game = state?.game;
+    if (
+      state?.version !== 1 ||
+      typeof state.prompt !== "string" ||
+      !Array.isArray(state.bots) ||
+      !state.bots.every((bot) => typeof bot === "string") ||
+      (game !== null &&
+        (typeof game?.id !== "string" ||
+          !Number.isSafeInteger(game.startedAt) ||
+          typeof game.dev !== "boolean")) ||
+      (game === null) !== (state.lobby?.game === null)
+    )
+      throw new Error("Unsupported or malformed stored lobby.");
+    this.lobby.restore(state.lobby);
+    this.bots.clear();
+    for (const bot of state.bots) this.bots.add(bot);
+    this.prompt = state.prompt;
+    this.currentGame = game && { ...game, startedAt: new Date(game.startedAt) };
+    this.savedState = JSON.stringify(this.snapshot());
   }
 
   handle(input: SlackInput): SlackMessage[] {
@@ -128,7 +183,7 @@ export class SlackGame {
           }
         }
         const { aliveVillagers, aliveWolves } = this.lobby.start(user).state();
-        this.currentGame = { id: crypto.randomUUID(), startedAt: new Date() };
+        this.currentGame = { id: crypto.randomUUID(), startedAt: new Date(), dev: this.dev };
         this.prompt = crypto.randomUUID();
         this.publish(
           `The game has started with ${this.lobby.size} players. Teams: ${aliveWolves} ${aliveWolves === 1 ? "Werewolf" : "Werewolves"} and ${aliveVillagers} Villagers. Roles are in your DMs.`,
@@ -332,7 +387,6 @@ export class SlackGame {
           channelId: this.channel,
           finishedAt: new Date(),
           winner: state.winner!,
-          dev: this.dev,
           players: state.players.map((player) => ({
             seat: player.id,
             userId: this.user(player.id),
