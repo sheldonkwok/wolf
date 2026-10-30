@@ -5,6 +5,8 @@ use crate::rng::{SplitMix64, time_seed};
 mod error;
 mod player;
 #[cfg(test)]
+mod structured_tests;
+#[cfg(test)]
 mod tests;
 #[cfg(test)]
 mod witch_tests;
@@ -23,6 +25,19 @@ pub enum Phase {
     Ended,
     /// An eliminated hunter takes their final shot before play resumes.
     Hunter,
+    /// The first morning of a structured game: candidates declare and the others elect a sheriff before the Night 1 report.
+    Sheriff,
+    /// A dead sheriff passes the badge to a living player or tears it up.
+    Badge,
+}
+
+/// Which rule set a game is played under.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Ruleset {
+    /// Random special roles from [`Engine::SPECIAL_ROLES`]; every game opens on Day 1.
+    Standard,
+    /// The fixed 12-player roster of [`Engine::STRUCTURED_ROLES`]; opens at night, then elects a sheriff before the first dawn report.
+    Structured,
 }
 
 /// The winning team once the game is over.
@@ -44,6 +59,8 @@ pub enum NightOutcome {
     NoConsensus { targets: Vec<PlayerId> },
     /// The pack's target is locked and the witch must act before the night can finish.
     AwaitingWitch,
+    /// Structured Night 1 is over; its report waits until [`Engine::resolve_sheriff`].
+    Election,
 }
 
 /// The witch's decision for one night; she may use at most one potion.
@@ -75,12 +92,34 @@ pub enum DayOutcome {
     Eliminated(PlayerId),
     /// A complete ballot tied for the most votes; nobody was eliminated.
     Tied,
+    /// The voted-out Fool revealed their role and survives without a vote.
+    FoolRevealed(PlayerId),
+}
+
+/// Who won the sheriff election.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SheriffOutcome {
+    /// A lone candidate, early majority, or unique leader of a complete ballot holds the badge.
+    Elected(PlayerId),
+    /// No candidates, no voters, or a tie for the most votes; the game has no sheriff.
+    Tied,
+}
+
+/// The sheriff election with the Night 1 report it delayed.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Election {
+    pub outcome: SheriffOutcome,
+    /// The attacked player if they lived.
+    pub saved: Option<PlayerId>,
+    /// Night 1 deaths in id order, without causes.
+    pub deaths: Vec<PlayerId>,
 }
 
 /// The game engine and moderator: owns all state, built with [`Engine::new`] or [`Engine::with_roles`] and driven by the night/day commands.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Engine {
     players: Vec<Player>,
+    ruleset: Ruleset,
     phase: Phase,
     round: usize,
     winner: Option<Winner>,
@@ -97,6 +136,22 @@ pub struct Engine {
     witch_choice: Option<WitchChoice>,
     heal_used: bool,
     poison_used: bool,
+    /// Player -> whether they run for sheriff; voting opens once every living player has declared.
+    nominations: BTreeMap<PlayerId, bool>,
+    /// Candidates who dropped out; they cannot vote.
+    withdrawn: BTreeSet<PlayerId>,
+    /// Non-candidate -> their sheriff candidate.
+    sheriff_votes: BTreeMap<PlayerId, PlayerId>,
+    /// The badge holder, kept after death until they pass it.
+    sheriff: Option<PlayerId>,
+    /// Night 1's `(saved, deaths, silenced hunter)`, held back until the election ends.
+    first_dawn: Option<(Option<PlayerId>, Vec<PlayerId>, Option<PlayerId>)>,
+    /// Where play resumes once a dead sheriff has passed the badge.
+    badge_next: Phase,
+    /// The Fool who survived a vote and can no longer vote.
+    revealed_fool: Option<PlayerId>,
+    /// Night 1 victims who may still share their last words.
+    last_words: BTreeSet<PlayerId>,
 }
 
 impl Engine {
@@ -106,7 +161,29 @@ impl Engine {
     /// The village roles a deal draws from; a roster holds at most one of each.
     pub const SPECIAL_ROLES: [Role; 4] = [Role::Doctor, Role::Seer, Role::Hunter, Role::Witch];
 
-    /// Deal `max(1, player_count / 3)` wolves and up to `max(2, floor(village_count * 33%))` distinct special village roles.
+    /// The exact player count dealt under [`Ruleset::Structured`].
+    pub const STRUCTURED_PLAYERS: usize = 12;
+
+    /// The structured roster: four wolves, four villagers, and the Seer, Witch, Hunter, and Fool.
+    pub const STRUCTURED_ROLES: [Role; 12] = [
+        Role::Werewolf,
+        Role::Werewolf,
+        Role::Werewolf,
+        Role::Werewolf,
+        Role::Villager,
+        Role::Villager,
+        Role::Villager,
+        Role::Villager,
+        Role::Seer,
+        Role::Witch,
+        Role::Hunter,
+        Role::Fool,
+    ];
+
+    /// Sheriff votes count as this many half votes; everyone else's count as two.
+    const SHERIFF_HALVES: usize = 3;
+
+    /// Deal `max(1, player_count / 3)` wolves and up to `max(2, floor(village_count * 33%))` distinct special village roles; exactly 12 players get the structured roster.
     pub fn new(player_count: usize) -> Result<Self, GameError> {
         Self::with_seed(player_count, time_seed())
     }
@@ -120,9 +197,14 @@ impl Engine {
             });
         }
 
+        let mut rng = SplitMix64::new(seed);
+        if player_count == Self::STRUCTURED_PLAYERS {
+            let mut roles = Self::STRUCTURED_ROLES;
+            rng.shuffle(&mut roles);
+            return Ok(Self::from_roles(&roles, Ruleset::Structured));
+        }
         let wolves = (player_count / 3).max(1);
         let villagers = player_count - wolves;
-        let mut rng = SplitMix64::new(seed);
         let mut special_roles = Self::SPECIAL_ROLES;
         let special_count = (villagers * 33 / 100).max(2).min(special_roles.len());
         rng.shuffle(&mut special_roles);
@@ -135,11 +217,27 @@ impl Engine {
         ));
         rng.shuffle(&mut roles);
 
-        Ok(Self::from_roles(&roles))
+        Ok(Self::from_roles(&roles, Ruleset::Standard))
     }
 
     /// Build a game from an exact role list (`roles[i]` is `Pi`), rejecting rosters the game could never begin from; this is the deterministic constructor tests use.
     pub fn with_roles(roles: &[Role]) -> Result<Self, GameError> {
+        Self::with_ruleset(roles, Ruleset::Standard)
+    }
+
+    /// Like [`Engine::with_roles`] under `ruleset`; a structured roster must be a permutation of [`Engine::STRUCTURED_ROLES`].
+    pub fn with_ruleset(roles: &[Role], ruleset: Ruleset) -> Result<Self, GameError> {
+        if ruleset == Ruleset::Structured {
+            let mut sorted = roles.to_vec();
+            let mut expected = Self::STRUCTURED_ROLES.to_vec();
+            sorted.sort_by_key(|r| *r as u8);
+            expected.sort_by_key(|r| *r as u8);
+            if sorted != expected {
+                return Err(GameError::InvalidRoster(
+                    "structured games need 4 werewolves, 4 villagers, a seer, a witch, a hunter, and a fool",
+                ));
+            }
+        }
         if roles.len() < Self::MIN_PLAYERS {
             return Err(GameError::TooFewPlayers {
                 got: roles.len(),
@@ -156,17 +254,17 @@ impl Engine {
                 "werewolves start at or above parity with villagers",
             ));
         }
-        for role in Self::SPECIAL_ROLES {
+        for role in Self::SPECIAL_ROLES.into_iter().chain([Role::Fool]) {
             if roles.iter().filter(|r| **r == role).count() > 1 {
                 return Err(GameError::InvalidRoster(
-                    "at most one doctor, one seer, one hunter, and one witch are allowed",
+                    "at most one doctor, one seer, one hunter, one witch, and one fool are allowed",
                 ));
             }
         }
-        Ok(Self::from_roles(roles))
+        Ok(Self::from_roles(roles, ruleset))
     }
 
-    fn from_roles(roles: &[Role]) -> Self {
+    fn from_roles(roles: &[Role], ruleset: Ruleset) -> Self {
         let players = roles
             .iter()
             .enumerate()
@@ -174,7 +272,11 @@ impl Engine {
             .collect();
         Engine {
             players,
-            phase: Phase::Day,
+            ruleset,
+            phase: match ruleset {
+                Ruleset::Standard => Phase::Day,
+                Ruleset::Structured => Phase::Night,
+            },
             round: 1,
             winner: None,
             night_picks: BTreeMap::new(),
@@ -187,6 +289,14 @@ impl Engine {
             witch_choice: None,
             heal_used: false,
             poison_used: false,
+            nominations: BTreeMap::new(),
+            withdrawn: BTreeSet::new(),
+            sheriff_votes: BTreeMap::new(),
+            sheriff: None,
+            first_dawn: None,
+            badge_next: Phase::Day,
+            revealed_fool: None,
+            last_words: BTreeSet::new(),
         }
     }
 
@@ -290,7 +400,7 @@ impl Engine {
         Ok(())
     }
 
-    /// Resolve the night: lock the pack's target, wait for a witch who still holds a potion, then apply deaths and advance.
+    /// Resolve the night: lock the pack's target, wait for a witch who still holds a potion, then apply deaths and advance; structured Night 1 holds its deaths for the election.
     pub fn resolve_night(&mut self) -> Result<NightOutcome, GameError> {
         self.ensure_phase(Phase::Night)?;
 
@@ -333,57 +443,171 @@ impl Engine {
             deaths.insert(poisoned);
         }
         let deaths: Vec<PlayerId> = deaths.into_iter().collect();
+        let saved = (!deaths.contains(&target)).then_some(target);
+        // A structured Hunter who is poisoned cannot shoot.
+        let silenced = match choice {
+            Some(WitchChoice::Poison(poisoned)) if self.ruleset == Ruleset::Structured => {
+                Some(poisoned)
+            }
+            _ => None,
+        };
         self.attack = None;
         self.night_picks.clear();
         self.doctor_picks.clear();
         self.seer_picks.clear();
-        self.eliminate(&deaths, Phase::Day);
-        Ok(NightOutcome::Dawn {
-            saved: (!deaths.contains(&target)).then_some(target),
-            deaths,
-        })
+        if self.ruleset == Ruleset::Structured && self.round == 1 {
+            self.first_dawn = Some((saved, deaths, silenced));
+            self.phase = Phase::Sheriff;
+            return Ok(NightOutcome::Election);
+        }
+        self.eliminate(&deaths, Phase::Day, silenced);
+        Ok(NightOutcome::Dawn { saved, deaths })
     }
 
-    /// Record or replace a living player's day vote for a living target.
+    /// Record or replace a living player's day vote for a living target; a revealed Fool cannot vote.
     pub fn vote(&mut self, voter: PlayerId, target: PlayerId) -> Result<(), GameError> {
         self.ensure_phase(Phase::Day)?;
         self.require_alive(voter)?;
         self.require_alive(target)?;
+        if !self.can_vote(voter) {
+            return Err(GameError::CannotVote(voter));
+        }
         self.day_votes.insert(voter, target);
         Ok(())
     }
 
-    /// Resolve an early majority or complete ballot, skipping any unused Day 1 inspection; a tie begins night.
+    /// Resolve an early majority or complete ballot, skipping any unused Day 1 inspection; a tie begins night and an unrevealed Fool survives.
     pub fn resolve_day(&mut self) -> Result<DayOutcome, GameError> {
         self.ensure_phase(Phase::Day)?;
-        let target = if let Some(target) = self.majority_target() {
-            Some(target)
-        } else {
-            if self.day_votes.len() < self.alive().count() {
-                return Err(GameError::NoMajority);
-            }
-            let mut tally = BTreeMap::new();
-            for &target in self.day_votes.values() {
-                *tally.entry(target).or_insert(0) += 1;
-            }
-            let most = tally.values().copied().max().expect("living players voted");
-            let mut leaders = tally.iter().filter(|(_, count)| **count == most);
-            let (&leader, _) = leaders.next().expect("a leading target");
-            if leaders.next().is_none() {
-                Some(leader)
-            } else {
-                None
-            }
-        };
+        let target = self.ballot_result(&self.day_votes)?;
         self.day_votes.clear();
         self.seer_picks.clear();
-        if let Some(target) = target {
-            self.eliminate(&[target], Phase::Night);
-            Ok(DayOutcome::Eliminated(target))
-        } else {
-            self.resume(Phase::Night);
-            Ok(DayOutcome::Tied)
+        self.last_words.clear();
+        match target {
+            Some(target)
+                if self.players[target.index()].role() == Role::Fool
+                    && self.revealed_fool.is_none() =>
+            {
+                self.revealed_fool = Some(target);
+                if self.sheriff == Some(target) {
+                    self.sheriff = None;
+                }
+                self.resume(Phase::Night);
+                Ok(DayOutcome::FoolRevealed(target))
+            }
+            Some(target) => {
+                self.eliminate(&[target], Phase::Night, None);
+                Ok(DayOutcome::Eliminated(target))
+            }
+            None => {
+                self.resume(Phase::Night);
+                Ok(DayOutcome::Tied)
+            }
         }
+    }
+
+    /// Declare whether `player` runs for sheriff; they may change their mind until everyone has declared.
+    pub fn sheriff_nominate(&mut self, player: PlayerId, run: bool) -> Result<(), GameError> {
+        self.ensure_phase(Phase::Sheriff)?;
+        self.require_alive(player)?;
+        if self.sheriff_voting() {
+            return Err(GameError::NominationsClosed);
+        }
+        self.nominations.insert(player, run);
+        Ok(())
+    }
+
+    /// A candidate drops out once voting is open; votes for them are cleared and they still cannot vote.
+    pub fn sheriff_withdraw(&mut self, candidate: PlayerId) -> Result<(), GameError> {
+        self.ensure_phase(Phase::Sheriff)?;
+        self.require_alive(candidate)?;
+        if !self.sheriff_voting() {
+            return Err(GameError::NominationsOpen);
+        }
+        if !self.sheriff_candidates().contains(&candidate) {
+            return Err(GameError::NotACandidate(candidate));
+        }
+        self.withdrawn.insert(candidate);
+        self.sheriff_votes.retain(|_, pick| *pick != candidate);
+        Ok(())
+    }
+
+    /// Record or replace a non-candidate's vote for a candidate once every living player has declared.
+    pub fn sheriff_vote(&mut self, voter: PlayerId, candidate: PlayerId) -> Result<(), GameError> {
+        self.ensure_phase(Phase::Sheriff)?;
+        self.require_alive(voter)?;
+        self.require_alive(candidate)?;
+        if !self.sheriff_voting() {
+            return Err(GameError::NominationsOpen);
+        }
+        if !self.can_vote(voter) {
+            return Err(GameError::CannotVote(voter));
+        }
+        if !self.sheriff_candidates().contains(&candidate) {
+            return Err(GameError::NotACandidate(candidate));
+        }
+        self.sheriff_votes.insert(voter, candidate);
+        Ok(())
+    }
+
+    /// Elect a lone candidate, an early majority, or a complete ballot's unique leader, then apply the Night 1 report.
+    pub fn resolve_sheriff(&mut self) -> Result<Election, GameError> {
+        self.ensure_phase(Phase::Sheriff)?;
+        if !self.sheriff_voting() {
+            return Err(GameError::ActionsIncomplete {
+                waiting_on: self.pending_actors(),
+            });
+        }
+        let candidates = self.sheriff_candidates();
+        let winner = match candidates.as_slice() {
+            [] => None,
+            [only] => Some(*only),
+            _ if self.living_ids_where(|p| self.can_vote(p.id())).is_empty() => None,
+            _ => self.ballot_result(&self.sheriff_votes)?,
+        };
+        self.nominations.clear();
+        self.withdrawn.clear();
+        self.sheriff_votes.clear();
+        self.sheriff = winner;
+        let (saved, deaths, silenced) = self.first_dawn.take().unwrap_or_default();
+        self.last_words.extend(deaths.iter().copied());
+        self.eliminate(&deaths, Phase::Day, silenced);
+        Ok(Election {
+            outcome: winner.map_or(SheriffOutcome::Tied, SheriffOutcome::Elected),
+            saved,
+            deaths,
+        })
+    }
+
+    /// A dead sheriff hands the badge to a living player, or tears it up with `None`.
+    pub fn pass_badge(
+        &mut self,
+        sheriff: PlayerId,
+        successor: Option<PlayerId>,
+    ) -> Result<(), GameError> {
+        self.ensure_phase(Phase::Badge)?;
+        self.role_of(sheriff)?;
+        if self.sheriff != Some(sheriff) {
+            return Err(GameError::NotTheSheriff(sheriff));
+        }
+        if let Some(successor) = successor {
+            self.require_alive(successor)?;
+        }
+        self.sheriff = successor;
+        self.resume(self.badge_next);
+        Ok(())
+    }
+
+    /// A Night 1 victim in a structured game shares their last words once, before Day 1 ends.
+    pub fn last_words(&mut self, player: PlayerId) -> Result<(), GameError> {
+        if self.phase == Phase::Ended {
+            return Err(GameError::GameOver);
+        }
+        self.role_of(player)?;
+        if !self.last_words.remove(&player) {
+            return Err(GameError::NoLastWords(player));
+        }
+        Ok(())
     }
 
     /// The eliminated hunter must shoot one living player before victory is checked.
@@ -451,15 +675,71 @@ impl Engine {
             .ok_or(GameError::UnknownPlayer(id))
     }
 
+    /// The rule set this game is played under.
+    pub fn ruleset(&self) -> Ruleset {
+        self.ruleset
+    }
+
+    /// The living sheriff, if one was elected and still holds the badge.
+    pub fn sheriff(&self) -> Option<PlayerId> {
+        self.sheriff.filter(|&id| self.is_alive(id))
+    }
+
+    /// The Fool who survived a vote, if any; they stay alive without a vote.
+    pub fn revealed_fool(&self) -> Option<PlayerId> {
+        self.revealed_fool
+    }
+
+    /// Whether `id` may vote now: candidates cannot elect the sheriff, and a revealed Fool cannot vote by day.
+    pub fn can_vote(&self, id: PlayerId) -> bool {
+        if !self.is_alive(id) {
+            return false;
+        }
+        match self.phase {
+            Phase::Sheriff => self.sheriff_voting() && self.nominations.get(&id) == Some(&false),
+            _ => self.revealed_fool != Some(id),
+        }
+    }
+
+    /// Whether every living player has declared, so sheriff voting is open.
+    pub fn sheriff_voting(&self) -> bool {
+        self.phase == Phase::Sheriff && self.alive().all(|p| self.nominations.contains_key(&p.id()))
+    }
+
+    /// Living sheriff candidates who have not withdrawn, in id order.
+    pub fn sheriff_candidates(&self) -> Vec<PlayerId> {
+        self.living_ids_where(|p| {
+            self.nominations.get(&p.id()) == Some(&true) && !self.withdrawn.contains(&p.id())
+        })
+    }
+
+    /// Players who have declared so far as `player -> runs`.
+    pub fn sheriff_nominations(&self) -> BTreeMap<PlayerId, bool> {
+        self.nominations.clone()
+    }
+
+    /// How much `voter`'s day vote counts: 1.5 for the sheriff, otherwise 1.
+    pub fn vote_weight(&self, voter: PlayerId) -> f64 {
+        self.vote_halves(voter) as f64 / 2.0
+    }
+
+    /// Night 1 victims who may still share their last words, in id order.
+    pub fn pending_last_words(&self) -> Vec<PlayerId> {
+        self.last_words.iter().copied().collect()
+    }
+
     /// `(living village team including every special role, living werewolves)`.
     pub fn alive_count_by_role(&self) -> (usize, usize) {
         let mut villagers = 0;
         let mut wolves = 0;
         for p in self.alive() {
             match p.role() {
-                Role::Villager | Role::Doctor | Role::Seer | Role::Hunter | Role::Witch => {
-                    villagers += 1
-                }
+                Role::Villager
+                | Role::Doctor
+                | Role::Seer
+                | Role::Hunter
+                | Role::Witch
+                | Role::Fool => villagers += 1,
                 Role::Werewolf => wolves += 1,
             }
         }
@@ -476,13 +756,19 @@ impl Engine {
                 Role::Werewolf => !self.night_picks.contains_key(&p.id()),
                 Role::Doctor => !self.doctor_picks.contains_key(&p.id()),
                 Role::Seer => !self.seer_picks.contains_key(&p.id()),
-                Role::Villager | Role::Hunter | Role::Witch => false,
+                Role::Villager | Role::Hunter | Role::Witch | Role::Fool => false,
             }),
-            Phase::Day => self
-                .living_ids_where(|_| true)
-                .into_iter()
-                .filter(|id| !self.day_votes.contains_key(id))
-                .collect(),
+            Phase::Day => self.living_ids_where(|p| {
+                self.can_vote(p.id()) && !self.day_votes.contains_key(&p.id())
+            }),
+            Phase::Sheriff if !self.sheriff_voting() => {
+                self.living_ids_where(|p| !self.nominations.contains_key(&p.id()))
+            }
+            Phase::Sheriff if self.sheriff_candidates().len() < 2 => Vec::new(),
+            Phase::Sheriff => self.living_ids_where(|p| {
+                self.can_vote(p.id()) && !self.sheriff_votes.contains_key(&p.id())
+            }),
+            Phase::Badge => vec![self.sheriff.expect("badge phase has a sheriff")],
             Phase::Hunter => vec![self.pending_hunter.expect("hunter phase has an actor").0],
             Phase::Ended => Vec::new(),
         }
@@ -496,22 +782,28 @@ impl Engine {
         self.living_ids_where(|p| p.role() == Role::Seer && !self.seer_picks.contains_key(&p.id()))
     }
 
-    /// Votes needed for an early elimination: strictly more than half the living players.
+    /// Weighted votes needed for an early result: strictly more than half the living players who may vote.
     pub fn majority_required(&self) -> usize {
-        self.alive().count() / 2 + 1
+        self.living_ids_where(|p| self.can_vote(p.id())).len() / 2 + 1
     }
 
-    /// The early majority target; adapters also resolve when no day voters remain pending.
+    /// The early majority target of the current day or sheriff ballot; adapters also resolve when no voters remain pending.
     pub fn majority_target(&self) -> Option<PlayerId> {
-        let mut tally = BTreeMap::new();
-        for &target in self.day_votes.values() {
-            let count = tally.entry(target).or_insert(0);
-            *count += 1;
-            if *count >= self.majority_required() {
-                return Some(target);
-            }
-        }
-        None
+        let votes = match self.phase {
+            Phase::Day => &self.day_votes,
+            Phase::Sheriff => &self.sheriff_votes,
+            _ => return None,
+        };
+        let needed = self.majority_required() * 2;
+        self.tally(votes)
+            .into_iter()
+            .find(|&(_, halves)| halves >= needed)
+            .map(|(target, _)| target)
+    }
+
+    /// Sheriff votes cast so far as `voter -> candidate`; empty outside the election.
+    pub fn current_sheriff_votes(&self) -> BTreeMap<PlayerId, PlayerId> {
+        self.sheriff_votes.clone()
     }
 
     /// Votes cast so far this day as `voter -> target`; empty outside the day phase.
@@ -561,13 +853,13 @@ impl Engine {
     // ----- internals --------------------------------------------------------
 
     /// Kill every target at once; a hunter among them shoots before play resumes at `next`.
-    fn eliminate(&mut self, targets: &[PlayerId], next: Phase) {
+    fn eliminate(&mut self, targets: &[PlayerId], next: Phase, silenced: Option<PlayerId>) {
         for target in targets {
             self.players[target.index()].kill();
         }
         let hunter = targets
             .iter()
-            .find(|id| self.players[id.index()].role() == Role::Hunter);
+            .find(|&&id| self.players[id.index()].role() == Role::Hunter && Some(id) != silenced);
         if let Some(&hunter) = hunter {
             self.pending_hunter = Some((hunter, next));
             self.phase = Phase::Hunter;
@@ -576,23 +868,71 @@ impl Engine {
         }
     }
 
+    /// Half votes per ballot: the sheriff's day vote counts three, everyone else's two.
+    fn vote_halves(&self, voter: PlayerId) -> usize {
+        if self.phase == Phase::Day && self.sheriff() == Some(voter) {
+            Self::SHERIFF_HALVES
+        } else {
+            2
+        }
+    }
+
+    /// Weighted half votes per target.
+    fn tally(&self, votes: &BTreeMap<PlayerId, PlayerId>) -> BTreeMap<PlayerId, usize> {
+        let mut tally = BTreeMap::new();
+        for (&voter, &target) in votes {
+            *tally.entry(target).or_insert(0) += self.vote_halves(voter);
+        }
+        tally
+    }
+
+    /// The early majority, else the unique leader once every eligible voter has voted; `None` is a tie.
+    fn ballot_result(
+        &self,
+        votes: &BTreeMap<PlayerId, PlayerId>,
+    ) -> Result<Option<PlayerId>, GameError> {
+        if let Some(target) = self.majority_target() {
+            return Ok(Some(target));
+        }
+        if !self.pending_actors().is_empty() {
+            return Err(GameError::NoMajority);
+        }
+        let tally = self.tally(votes);
+        let most = tally.values().copied().max().expect("living players voted");
+        let mut leaders = tally.iter().filter(|(_, halves)| **halves == most);
+        let (&leader, _) = leaders.next().expect("a leading target");
+        Ok(leaders.next().is_none().then_some(leader))
+    }
+
     /// A living witch takes a turn only while she still holds a potion.
     fn witch_can_act(&self) -> bool {
         !(self.heal_used && self.poison_used) && self.alive().any(|p| p.role() == Role::Witch)
     }
 
+    /// Check for a winner, let a dead sheriff pass the badge, then enter `next`; structured rounds count Night N then Day N.
     fn resume(&mut self, next: Phase) {
         self.settle();
-        if self.phase != Phase::Ended {
-            self.phase = next;
-            if next == Phase::Day {
-                self.round += 1;
-            }
+        if self.phase == Phase::Ended {
+            return;
+        }
+        if self.sheriff.is_some_and(|id| !self.is_alive(id)) {
+            self.badge_next = next;
+            self.phase = Phase::Badge;
+            return;
+        }
+        self.phase = next;
+        let new_round = match self.ruleset {
+            Ruleset::Standard => Phase::Day,
+            Ruleset::Structured => Phase::Night,
+        };
+        if next == new_round {
+            self.round += 1;
         }
     }
 
+    /// Only standard games give the Seer a Day 1 inspection; structured games open at night.
     fn is_day_one(&self) -> bool {
-        self.phase == Phase::Day && self.round == 1
+        self.phase == Phase::Day && self.round == 1 && self.ruleset == Ruleset::Standard
     }
 
     fn ensure_phase(&self, expected: Phase) -> Result<(), GameError> {

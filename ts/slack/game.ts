@@ -3,15 +3,26 @@ import {
   botDayInspection,
   botDayVotes,
   botNightActions,
+  botPassBadge,
+  botSheriffNominations,
+  botSheriffVotes,
   livingIds,
   livingWolves,
   pick,
 } from "../bots.js";
 import type { ChannelStats, FinishedGame, PlayerStats } from "../db/index.js";
-import { GameError, Rng, timeSeed } from "../engine.js";
+import { GameError, type GameState, Rng, timeSeed } from "../engine.js";
 import { Lobby, LobbyError } from "../lobby.js";
 import { verdict } from "../render.js";
-import { VOTE_COMMAND, votingRules, votingSummary } from "./copy.js";
+import {
+  LAST_WORDS_COMMAND,
+  NOMINATE_COMMANDS,
+  SHERIFF_COMMAND,
+  structuredRules,
+  VOTE_COMMAND,
+  votingRules,
+  votingSummary,
+} from "./copy.js";
 import { roleBlurb } from "./rules.js";
 import { channelStats, personalStats } from "./stats.js";
 
@@ -36,7 +47,7 @@ export type SlackInput = {
   channel: string;
 } & ({ kind: "mention" | "dm"; text: string } | { kind: "choice"; value: string });
 
-const HELP = `In the game channel: \`@werewolf join\`, \`leave\`, \`start\`, \`end\`, \`status\`, \`stats\`, \`vote @player\`, or \`help\`. The first player is host; only the host starts or ends games. Use \`@werewolf end\` to cancel the game and open a fresh lobby. During the day, vote publicly with ${VOTE_COMMAND}. ${votingRules()} Every game starts on Day 1. A Seer may privately inspect one player during Day 1 using DM dropdowns; if Day 1 ends first, that inspection is skipped. Use DM dropdowns for the Seer's Day 1 inspection, night actions, and the Hunter's final shot. DM \`status\` to get your role, inspection history, and current prompt again. DM \`stats\` for your lifetime wins, losses, and team breakdowns; use \`@werewolf stats\` in the channel for team win rates and the top 3 most frequent wolves. Stats count completed games in this channel, excluding dev games and bots.`;
+const HELP = `In the game channel: \`@werewolf join\`, \`leave\`, \`start\`, \`end\`, \`status\`, \`stats\`, \`vote @player\`, \`run\`, \`pass\`, \`withdraw\`, \`sheriff @player\`, \`last words <message>\`, or \`help\`. The first player is host; only the host starts or ends games. Use \`@werewolf end\` to cancel the game and open a fresh lobby. During the day, vote publicly with ${VOTE_COMMAND}. ${votingRules()} Every game except a 12-player game starts on Day 1. A Seer may privately inspect one player during Day 1 using DM dropdowns; if Day 1 ends first, that inspection is skipped. Use DM dropdowns for the Seer's Day 1 inspection, night actions, the Hunter's final shot, and passing the sheriff's badge. ${structuredRules()} DM \`status\` to get your role, inspection history, and current prompt again. DM \`stats\` for your lifetime wins, losses, and team breakdowns; use \`@werewolf stats\` in the channel for team win rates and the top 3 most frequent wolves. Stats count completed games in this channel, excluding dev games and bots.`;
 
 export class SlackGame {
   private readonly seen = new Set<string>();
@@ -46,6 +57,8 @@ export class SlackGame {
   private readonly rng: Rng;
   private readonly dev: boolean;
   private currentGame: { id: string; startedAt: Date } | null = null;
+  // Whether the candidate list has been announced for the current sheriff election.
+  private candidatesAnnounced = false;
   private readonly results: FinishedGame[] = [];
 
   constructor(
@@ -108,7 +121,22 @@ export class SlackGame {
       this.publicVote(user, command);
       return;
     }
+    if (/^sheriff\b/i.test(command)) {
+      this.sheriffVote(user, command);
+      return;
+    }
+    if (/^last\s*words\b/i.test(command)) {
+      this.lastWords(user, command);
+      return;
+    }
     switch (command.toLowerCase()) {
+      case "run":
+      case "pass":
+        this.nominate(user, command.toLowerCase() === "run");
+        break;
+      case "withdraw":
+        this.withdraw(user);
+        break;
       case "join":
         this.lobby.join(user, user);
         this.publish(`<@${user}> joined. ${this.roster()}`);
@@ -127,11 +155,11 @@ export class SlackGame {
             this.bots.add(user);
           }
         }
-        const { aliveVillagers, aliveWolves } = this.lobby.start(user).state();
+        const { aliveVillagers, aliveWolves, ruleset } = this.lobby.start(user).state();
         this.currentGame = { id: crypto.randomUUID(), startedAt: new Date() };
         this.prompt = crypto.randomUUID();
         this.publish(
-          `The game has started with ${this.lobby.size} players. Teams: ${aliveWolves} ${aliveWolves === 1 ? "Werewolf" : "Werewolves"} and ${aliveVillagers} Villagers. Roles are in your DMs.`,
+          `The game has started with ${this.lobby.size} players. Teams: ${aliveWolves} ${aliveWolves === 1 ? "Werewolf" : "Werewolves"} and ${aliveVillagers} Villagers. Roles are in your DMs.${ruleset === "Structured" ? ` ${structuredRules()}` : ""}`,
         );
         for (const member of this.lobby.members) this.sendRole(member.user);
         this.announcePhase();
@@ -165,25 +193,103 @@ export class SlackGame {
   }
 
   private publicVote(user: string, command: string): void {
-    const game = this.lobby.game;
-    const seat = this.lobby.seatOf(user);
-    if (!game || seat === null) throw new CommandError("You are not in an active game.");
-    const mention = /^vote\s+<@([A-Z0-9]+)(?:\|[^>]+)?>$/i.exec(command);
-    const botSeat = this.dev ? /^vote\s+(\d+)$/i.exec(command) : null;
-    const target = mention ? this.lobby.seatOf(mention[1]!) : botSeat ? Number(botSeat[1]) - 1 : null;
-    if (!mention && !botSeat) throw new CommandError(`Use ${VOTE_COMMAND} to mention one player.`);
-    if (target === null || !Number.isSafeInteger(target) || !this.lobby.memberAt(target))
-      throw new CommandError("Unknown target. Mention a player in this game.");
+    const { game, seat, target } = this.ballotTarget(user, command, "vote", VOTE_COMMAND);
+    const state = game.state();
+    const player = state.players[seat]!;
+    if (state.phase === "Day" && player.alive && !player.canVote)
+      throw new CommandError("You were revealed as the Fool and can no longer vote.");
     game.vote(seat, target);
     this.announceVote(seat, target);
     this.advance(target);
   }
 
+  // The caller's seat and the running game during a sheriff election.
+  private election(user: string) {
+    const game = this.lobby.game;
+    const seat = this.lobby.seatOf(user);
+    if (!game || seat === null) throw new CommandError("You are not in an active game.");
+    if (game.state().phase !== "Sheriff") throw new CommandError("There is no sheriff election right now.");
+    return { game, seat, state: game.state() };
+  }
+
+  private nominate(user: string, runs: boolean): void {
+    const { game, seat, state } = this.election(user);
+    if (state.sheriffVoting) throw new CommandError("Candidacy is closed; sheriff voting has started.");
+    game.sheriffNominate(seat, runs);
+    this.announceNomination(seat, runs);
+    this.advance();
+  }
+
+  private announceNomination(seat: number, runs: boolean): void {
+    const state = this.lobby.game!.state();
+    const living = state.players.filter((p) => p.alive).length;
+    this.publish(
+      `${this.mention(seat)} ${runs ? "is running for sheriff" : "is not running for sheriff"} (${state.nominations.length}/${living} declared).`,
+    );
+  }
+
+  private withdraw(user: string): void {
+    const { game, seat, state } = this.election(user);
+    if (!state.sheriffVoting || !state.sheriffCandidates.includes(seat))
+      throw new CommandError("Only a sheriff candidate can withdraw once voting has started.");
+    game.sheriffWithdraw(seat);
+    this.publish(`${this.mention(seat)} withdrew from the sheriff race. Votes for them are cleared.`);
+    this.advance();
+  }
+
+  private sheriffVote(user: string, command: string): void {
+    const { game, seat, target } = this.ballotTarget(user, command, "sheriff", SHERIFF_COMMAND);
+    const state = this.election(user).state;
+    if (!state.sheriffVoting)
+      throw new CommandError(`Voting starts once everyone has declared with ${NOMINATE_COMMANDS}.`);
+    if (state.players[seat]!.alive && !state.players[seat]!.canVote)
+      throw new CommandError("Sheriff candidates, including those who withdrew, cannot vote.");
+    if (!state.sheriffCandidates.includes(target))
+      throw new CommandError(`Vote for a candidate: ${this.candidateList()}.`);
+    game.sheriffVote(seat, target);
+    this.announceSheriffVote(seat, target);
+    this.advance(target);
+  }
+
+  // Parse `<verb> @player`, or a dev bot's player number, into the caller's seat and target seat.
+  private ballotTarget(user: string, command: string, verb: string, usage: string) {
+    const game = this.lobby.game;
+    const seat = this.lobby.seatOf(user);
+    if (!game || seat === null) throw new CommandError("You are not in an active game.");
+    const mention = new RegExp(`^${verb}\\s+<@([A-Z0-9]+)(?:\\|[^>]+)?>$`, "i").exec(command);
+    const botSeat = this.dev ? new RegExp(`^${verb}\\s+(\\d+)$`, "i").exec(command) : null;
+    const target = mention ? this.lobby.seatOf(mention[1]!) : botSeat ? Number(botSeat[1]) - 1 : null;
+    if (!mention && !botSeat) throw new CommandError(`Use ${usage} to mention one player.`);
+    if (target === null || !Number.isSafeInteger(target) || !this.lobby.memberAt(target))
+      throw new CommandError("Unknown target. Mention a player in this game.");
+    return { game, seat, target };
+  }
+
+  private lastWords(user: string, command: string): void {
+    const game = this.lobby.game;
+    const seat = this.lobby.seatOf(user);
+    if (!game || seat === null) throw new CommandError("You are not in an active game.");
+    const words = /^last\s*words\s+([\s\S]+)$/i.exec(command)?.[1]?.trim();
+    if (!words) throw new CommandError(`Use ${LAST_WORDS_COMMAND} to share your last words.`);
+    if (!game.state().lastWords.includes(seat))
+      throw new CommandError(
+        "Only players eliminated on Night 1 of a 12-player game may share last words, once, before Day 1 ends.",
+      );
+    game.lastWords(seat);
+    this.publish(`Last words from ${this.mention(seat)}: ${words}`);
+  }
+
   private announceVote(seat: number, target: number): void {
     const state = this.lobby.game!.state();
-    const count = state.votes.filter((v) => v.target === target).length;
     this.publish(
-      `${this.mention(seat)} voted for ${this.mention(target)} (${count}/${state.majorityRequired} votes for an early majority).`,
+      `${this.mention(seat)} voted for ${this.mention(target)} (${tally(state, state.votes, target)}/${state.majorityRequired} votes for an early majority).`,
+    );
+  }
+
+  private announceSheriffVote(seat: number, target: number): void {
+    const state = this.lobby.game!.state();
+    this.publish(
+      `${this.mention(seat)} voted for ${this.mention(target)} as sheriff (${tally(state, state.sheriffVotes, target)}/${state.majorityRequired} votes to elect early).`,
     );
   }
 
@@ -194,11 +300,18 @@ export class SlackGame {
     const [prompt, owner, targetText, extra] = value.split(":");
     const state = game.state();
     const potion = state.phase === "Night" && game.roleOf(seat) === "Witch";
-    const valid = potion ? /^(\d+|heal|pass)$/ : /^\d+$/;
+    const valid = potion ? /^(\d+|heal|pass)$/ : state.phase === "Badge" ? /^(\d+|tear)$/ : /^\d+$/;
     if (prompt !== this.prompt || owner !== user || extra !== undefined || !valid.test(targetText ?? "")) {
       throw new CommandError(
         "That choice is expired or belongs to another player. DM `status` for your current prompt.",
       );
+    }
+    if (state.phase === "Badge") {
+      const successor = targetText === "tear" ? undefined : Number(targetText);
+      game.passBadge(seat, successor);
+      this.badgePassed(seat, successor);
+      this.advance();
+      return;
     }
     if (targetText === "heal" || targetText === "pass") {
       if (targetText === "heal") {
@@ -262,7 +375,27 @@ export class SlackGame {
         humanVote = null;
         continue;
       }
-      if (state.phase === "Day") {
+      if (state.phase === "Badge") {
+        const sheriff = state.pendingActors[0]!;
+        if (!this.isBot(sheriff)) return;
+        this.badgePassed(sheriff, botPassBadge(game, this.rng, sheriff));
+        continue;
+      }
+      if (state.phase === "Sheriff") {
+        if (!state.sheriffVoting) {
+          if (state.pendingActors.some((seat) => !this.isBot(seat))) return;
+          botSheriffNominations(game, this.rng, isBot, (seat, runs) => this.announceNomination(seat, runs));
+          continue;
+        }
+        if (!this.candidatesAnnounced) this.announceCandidates();
+        if (!ballotClosed(state)) {
+          if (humanVote === null && state.pendingActors.some((seat) => !this.isBot(seat))) return;
+          botSheriffVotes(game, this.rng, isBot, humanVote, (voter, target) =>
+            this.announceSheriffVote(voter, target),
+          );
+          if (!ballotClosed(game.state())) return;
+        }
+      } else if (state.phase === "Day") {
         botDayInspection(game, this.rng, isBot);
         if (!ballotClosed(state)) {
           const humansAlive = state.players.some((p) => p.alive && !this.isBot(p.id));
@@ -277,6 +410,36 @@ export class SlackGame {
       if (!this.resolvePhase()) return;
       humanVote = null;
     }
+  }
+
+  private announceCandidates(): void {
+    this.candidatesAnnounced = true;
+    const state = this.lobby.game!.state();
+    const count = state.sheriffCandidates.length;
+    this.publish(
+      count === 0
+        ? "Nobody is running for sheriff."
+        : count === 1
+          ? `${this.candidateList()} is the only candidate.`
+          : `Sheriff voting is open. Candidates: ${this.candidateList()}. Everyone else votes with ${SHERIFF_COMMAND}; candidates cannot vote and may drop out with \`@werewolf withdraw\`. ${state.majorityRequired} votes elect early; otherwise the unique leader wins once everyone has voted, and a tie means no sheriff. Repeat the command to change your vote.${this.dev ? " To vote for a dev bot, use its player number: @werewolf sheriff 3." : ""}`,
+    );
+  }
+
+  private candidateList(): string {
+    return this.lobby
+      .game!.state()
+      .sheriffCandidates.map((seat) => this.mention(seat))
+      .join(", ");
+  }
+
+  private badgePassed(sheriff: number, successor: number | undefined): void {
+    this.prompt = crypto.randomUUID();
+    this.publish(
+      successor === undefined
+        ? `${this.mention(sheriff)} tore up the sheriff's badge. There is no sheriff now.`
+        : `${this.mention(sheriff)} passed the sheriff's badge to ${this.mention(successor)}. Their day vote counts as 1.5 votes.`,
+    );
+    this.announcePhase();
   }
 
   private shoot(hunter: number, target: number): void {
@@ -308,19 +471,39 @@ export class SlackGame {
         this.promptActors();
         return true;
       }
-      if (result.saved !== null)
-        this.publish(
-          `The Werewolves attacked ${this.mention(result.saved)}, but they were saved!${result.deaths.length ? "" : " No one was eliminated."}`,
-        );
-      for (const seat of result.deaths) this.elimination(seat, "during the night");
+      if (result.kind === "Election") this.candidatesAnnounced = false;
+      else this.report(result);
+    } else if (state.phase === "Sheriff") {
+      const result = game.resolveSheriff();
+      this.prompt = crypto.randomUUID();
+      this.publish(
+        result.kind === "Elected"
+          ? `${this.mention(result.sheriff)} is elected sheriff! Their day vote counts as 1.5 votes.`
+          : "No sheriff was elected this game.",
+      );
+      this.report(result);
     } else {
       const result = game.resolveDay();
       this.prompt = crypto.randomUUID();
       if (result.kind === "Tied") this.publish("The most votes are tied. No one was eliminated.");
+      else if (result.kind === "FoolRevealed")
+        this.publish(
+          `${this.mention(result.fool)} was voted out, but they are the Fool! They stay in the game but can no longer vote.`,
+        );
       else this.elimination(result.eliminated, "by the village");
     }
     this.announcePhase();
     return true;
+  }
+
+  // The morning report: a save without its cause, each death, then any last words.
+  private report(dawn: { saved: number | null; deaths: number[] }): void {
+    if (dawn.saved !== null)
+      this.publish(
+        `The Werewolves attacked ${this.mention(dawn.saved)}, but they were saved!${dawn.deaths.length ? "" : " No one was eliminated."}`,
+      );
+    for (const seat of dawn.deaths) this.elimination(seat, "during the night");
+    this.inviteLastWords();
   }
 
   private announcePhase(): void {
@@ -348,7 +531,16 @@ export class SlackGame {
       this.resetLobby();
       return;
     }
-    if (state.phase === "Hunter") {
+    if (state.phase === "Sheriff") {
+      this.publish(
+        `Morning breaks. Before the night's report, the village elects a sheriff whose day vote counts as 1.5 votes. Everyone declares with ${NOMINATE_COMMANDS}; once all have declared, the non-candidates vote.\n${this.livingRoster()}`,
+      );
+    } else if (state.phase === "Badge") {
+      this.publish(
+        `${this.mention(state.pendingActors[0]!)} held the sheriff's badge. Play pauses until they pass it to a living player or tear it up in their DMs.`,
+      );
+      this.promptActors();
+    } else if (state.phase === "Hunter") {
       this.publish("The Hunter has a final shot. Play pauses until they choose a target in their DMs.");
       this.promptActors();
     } else if (state.phase === "Night") {
@@ -356,16 +548,31 @@ export class SlackGame {
       this.promptActors();
     } else {
       this.publish(
-        `Day ${state.round}. Discuss in <#${this.channel}> and vote with ${VOTE_COMMAND}. ${votingRules(state.majorityRequired)}${this.dev ? " To target a dev bot, use its player number: @werewolf vote 3." : ""}\n${this.livingRoster()}`,
+        `Day ${state.round}. Discuss in <#${this.channel}> and vote with ${VOTE_COMMAND}. ${votingRules(state.majorityRequired)}${state.sheriff == null ? "" : ` Sheriff ${this.mention(state.sheriff)}'s vote counts as 1.5 votes.`}${state.revealedFool == null || !state.players[state.revealedFool]!.alive ? "" : ` ${this.mention(state.revealedFool)} is the revealed Fool and cannot vote.`}${this.dev ? " To target a dev bot, use its player number: @werewolf vote 3." : ""}\n${this.livingRoster()}`,
       );
       this.promptActors();
     }
+  }
+
+  // Night 1 victims of a structured game may speak once before Day 1 ends.
+  private inviteLastWords(): void {
+    const speakers = this.lobby.game!.state().lastWords.filter((seat) => !this.isBot(seat));
+    if (speakers.length === 0) return;
+    this.publish(
+      `${speakers.map((seat) => this.mention(seat)).join(" and ")} may share last words once with ${LAST_WORDS_COMMAND} before Day 1 ends.`,
+    );
+    for (const seat of speakers)
+      this.dm(
+        this.user(seat),
+        `You were eliminated on the first night. Share your last words once in <#${this.channel}> with ${LAST_WORDS_COMMAND} before Day 1 ends.`,
+      );
   }
 
   private resetLobby(): void {
     for (const { user } of [...this.lobby.members]) this.lobby.leave(user);
     this.bots.clear();
     this.currentGame = null;
+    this.candidatesAnnounced = false;
     this.prompt = "";
   }
 
@@ -380,7 +587,11 @@ export class SlackGame {
     const state = this.lobby.game!.state();
     const seat = this.lobby.seatOf(user)!;
     const actors = state.phase === "Day" ? state.pendingInspectors : state.pendingActors;
-    if (!["Day", "Night", "Hunter"].includes(state.phase) || !actors.includes(seat)) return;
+    if (!["Day", "Night", "Hunter", "Badge"].includes(state.phase) || !actors.includes(seat)) return;
+    if (state.phase === "Badge") {
+      this.sendBadgePrompt(user);
+      return;
+    }
     const role = this.lobby.game!.roleOf(seat);
     if (role === "Witch" && state.phase === "Night") {
       this.sendWitchPrompt(user, seat);
@@ -406,6 +617,26 @@ export class SlackGame {
           ...(this.isBot(p.id) ? {} : { slackUser: this.user(p.id) }),
           value: `${this.prompt}:${user}:${p.id}`,
         })),
+    });
+  }
+
+  private sendBadgePrompt(user: string): void {
+    const state = this.lobby.game!.state();
+    this.messages.push({
+      destination: "dm",
+      user,
+      text: `You held the sheriff's badge. Pass it to a living player, whose day vote will count as 1.5 votes, or tear it up. Your choice is final.\n${this.livingRoster()}`,
+      choices: [
+        { label: "Tear up the badge", value: `${this.prompt}:${user}:tear` },
+        ...state.players
+          .filter((p) => p.alive)
+          .map((p) => ({
+            prefix: "Pass to ",
+            label: this.isBot(p.id) ? this.lobby.memberAt(p.id)!.name : this.user(p.id),
+            ...(this.isBot(p.id) ? {} : { slackUser: this.user(p.id) }),
+            value: `${this.prompt}:${user}:${p.id}`,
+          })),
+      ],
     });
   }
 
@@ -495,7 +726,7 @@ export class SlackGame {
       const player = state.players.find((player) => player.id === seat)!;
       const spent = role === "Witch" && !state.healAvailable && !state.poisonAvailable;
       const progress =
-        !player.alive || player.role === "Villager" || player.role === "Hunter" || spent
+        !player.alive || ["Villager", "Hunter", "Fool"].includes(player.role) || spent
           ? `You have no action to take on Night ${state.round}.`
           : role === "Witch" && !state.pendingActors.includes(seat)
             ? `Your Night ${state.round} turn comes after the Werewolves choose. You will get a dropdown then.`
@@ -510,9 +741,24 @@ export class SlackGame {
   private status(): string {
     const state = this.lobby.game?.state();
     if (!state) return this.roster();
+    const livingCount = state.players.filter((player) => player.alive).length;
+    if (state.phase === "Sheriff" && !state.sheriffVoting) {
+      const declared = new Set(state.nominations.map((n) => n.player));
+      const waiting = state.players
+        .filter((p) => p.alive && !declared.has(p.id))
+        .map((p) => this.mention(p.id));
+      return `Sheriff election: declare with ${NOMINATE_COMMANDS}.\nRunning: ${
+        state.nominations
+          .filter((n) => n.runs)
+          .map((n) => this.mention(n.player))
+          .join(", ") || "nobody yet"
+      }.\nNot declared: ${waiting.join(", ")}.`;
+    }
+    if (state.phase === "Sheriff") {
+      return `Sheriff election. Candidates: ${this.candidateList() || "none"}.\n${this.leaderboard(state.sheriffVotes, "Sheriff votes", `${state.majorityRequired} to elect early; all voted: unique leader wins, tie means no sheriff`)}\nVote with ${SHERIFF_COMMAND}.\nLiving players: ${livingCount}.`;
+    }
     if (state.phase === "Day") {
-      const livingCount = state.players.filter((player) => player.alive).length;
-      return `Day ${state.round}.\n${this.voteLeaderboard()}\nVote with ${VOTE_COMMAND}.\nLiving players: ${livingCount}.`;
+      return `Day ${state.round}.\n${this.leaderboard(state.votes, "Vote leaderboard", votingSummary(state.majorityRequired))}\nVote with ${VOTE_COMMAND}.${state.sheriff == null ? "" : `\nSheriff: ${this.mention(state.sheriff)} (vote counts 1.5).`}\nLiving players: ${livingCount}.`;
     }
     const night =
       state.phase === "Night"
@@ -521,28 +767,29 @@ export class SlackGame {
     return `${state.phase} ${state.round}.\n${this.livingRoster()}${night}`;
   }
 
-  private voteLeaderboard(): string {
+  private leaderboard(votes: GameState["votes"], title: string, summary: string): string {
     const state = this.lobby.game!.state();
     const votersByTarget = new Map<number, number[]>();
-    for (const { voter, target } of state.votes) {
+    for (const { voter, target } of votes) {
       const voters = votersByTarget.get(target) ?? [];
       voters.push(voter);
       votersByTarget.set(target, voters);
     }
-    const rows = [...votersByTarget.entries()]
-      .sort(([a, av], [b, bv]) => bv.length - av.length || a - b)
+    const rows = [...votersByTarget.keys()]
+      .map((target) => [target, tally(state, votes, target), votersByTarget.get(target)!] as const)
+      .sort(([a, av], [b, bv]) => bv - av || a - b)
       .map(
-        ([target, voters]) =>
-          `• ${this.mention(target)} — ${voters.length} ${voters.length === 1 ? "vote" : "votes"}\n  Voters: ${voters
+        ([target, count, voters]) =>
+          `• ${this.mention(target)} — ${count} ${count === 1 ? "vote" : "votes"}\n  Voters: ${voters
             .sort((a, b) => a - b)
             .map((voter) => this.mention(voter))
             .join(", ")}`,
       );
-    const voted = new Set(state.votes.map(({ voter }) => voter));
+    const voted = new Set(votes.map(({ voter }) => voter));
     const notVoted = state.players
-      .filter((player) => player.alive && !voted.has(player.id))
+      .filter((player) => player.canVote && !voted.has(player.id))
       .map((player) => this.mention(player.id));
-    return `Vote leaderboard (${votingSummary(state.majorityRequired)}):\n${rows.length ? rows.join("\n") : "No votes yet."}\nNot voted: ${notVoted.length ? notVoted.join(", ") : "Nobody"}.`;
+    return `${title} (${summary}):\n${rows.length ? rows.join("\n") : "No votes yet."}\nNot voted: ${notVoted.length ? notVoted.join(", ") : "Nobody"}.`;
   }
 
   private roster(): string {
@@ -590,3 +837,10 @@ export class SlackGame {
 }
 
 class CommandError extends Error {}
+
+// The weighted votes for `target`, counting the sheriff's day vote as 1.5.
+function tally(state: GameState, votes: GameState["votes"], target: number): number {
+  return votes
+    .filter((v) => v.target === target)
+    .reduce((sum, v) => sum + state.players[v.voter]!.voteWeight, 0);
+}

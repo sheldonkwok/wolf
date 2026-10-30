@@ -44,7 +44,7 @@ export function villagerBotVote(state: GameState, rng: Rng, myVote: number | nul
   return randomLivingOther(state, rng, bot);
 }
 
-// Whether the day can resolve: an early majority exists or every living player has voted.
+// Whether the day or sheriff ballot can resolve: an early majority exists or every eligible voter has voted.
 export function ballotClosed(state: GameState): boolean {
   return state.majorityTarget != null || state.pendingActors.length === 0;
 }
@@ -69,13 +69,63 @@ export function botDayVotes(
   const packLead = state.votes.find((v) => !isBot(v.voter) && isWolf(state, v.voter))?.target;
   const wolfTarget = packLead ?? randomLivingVillager(state, rng);
   for (const player of state.players) {
-    if (!player.alive || !isBot(player.id)) continue;
+    if (!player.canVote || !isBot(player.id)) continue;
     const target =
       !humansAlive || player.role === "Werewolf" ? wolfTarget : villagerBotVote(state, rng, lead, player.id);
     game.vote(player.id, target);
     onVote(player.id, target);
     if (ballotClosed(game.state())) break;
   }
+}
+
+// Undeclared bots run for sheriff a quarter of the time.
+export function botSheriffNominations(
+  game: Game,
+  rng: Rng,
+  isBot: (seat: number) => boolean,
+  onDeclare: (player: number, runs: boolean) => void,
+): void {
+  const state = game.state();
+  if (state.phase !== "Sheriff" || state.sheriffVoting) return;
+  for (const seat of state.pendingActors) {
+    if (!isBot(seat)) continue;
+    const runs = rng.chance(25);
+    game.sheriffNominate(seat, runs);
+    onDeclare(seat, runs);
+  }
+}
+
+// Cast bot sheriff votes in seat order: wolves back a candidate packmate, others follow `lead` half the time.
+export function botSheriffVotes(
+  game: Game,
+  rng: Rng,
+  isBot: (seat: number) => boolean,
+  lead: number | null,
+  onVote: (voter: number, candidate: number) => void,
+): void {
+  const state = game.state();
+  const candidates = state.sheriffCandidates;
+  if (!state.sheriffVoting || candidates.length === 0) return;
+  const packCandidates = candidates.filter((id) => isWolf(state, id));
+  for (const seat of state.pendingActors) {
+    if (!isBot(seat)) continue;
+    const candidate =
+      isWolf(state, seat) && packCandidates.length > 0
+        ? pick(rng, packCandidates)
+        : lead !== null && candidates.includes(lead) && rng.chance(50)
+          ? lead
+          : pick(rng, candidates);
+    game.sheriffVote(seat, candidate);
+    onVote(seat, candidate);
+    if (ballotClosed(game.state())) break;
+  }
+}
+
+// A dead bot sheriff passes the badge to a random living player, or tears it up a fifth of the time.
+export function botPassBadge(game: Game, rng: Rng, sheriff: number): number | undefined {
+  const successor = rng.chance(20) ? undefined : pick(rng, livingIds(game.state()));
+  game.passBadge(sheriff, successor);
+  return successor;
 }
 
 // A bot witch heals the victim she is shown half the time, otherwise occasionally poisons a random other player.

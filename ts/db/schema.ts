@@ -23,7 +23,9 @@ export const gamePlayers = sqliteTable(
       .references(() => games.id, { onDelete: "cascade" }),
     seat: integer("seat").notNull(),
     userId: text("user_id").notNull(),
-    role: text("role", { enum: ["Villager", "Werewolf", "Doctor", "Seer", "Hunter", "Witch"] }).notNull(),
+    role: text("role", {
+      enum: ["Villager", "Werewolf", "Doctor", "Seer", "Hunter", "Witch", "Fool"],
+    }).notNull(),
     isBot: integer("is_bot", { mode: "boolean" }).notNull().default(false),
   },
   (table) => [
@@ -32,7 +34,7 @@ export const gamePlayers = sqliteTable(
     index("game_players_user").on(table.userId),
     check(
       "game_players_role",
-      sql`${table.role} in ('Villager', 'Werewolf', 'Doctor', 'Seer', 'Hunter', 'Witch')`,
+      sql`${table.role} in ('Villager', 'Werewolf', 'Doctor', 'Seer', 'Hunter', 'Witch', 'Fool')`,
     ),
     check("game_players_seat", sql`${table.seat} >= 0`),
   ],

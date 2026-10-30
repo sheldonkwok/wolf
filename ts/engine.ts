@@ -11,12 +11,14 @@ import {
   type PlayerView,
   Rng,
   type Role,
+  type Ruleset,
+  type SheriffResult,
   timeSeed,
   type VoteView,
   type Winner,
 } from "./native/index.js";
 
-export type { GameState, InspectionView, PlayerView, Role, VoteView, Winner };
+export type { GameState, InspectionView, PlayerView, Role, Ruleset, VoteView, Winner };
 export { MIN_PLAYERS, Rng, timeSeed };
 
 // Typed against the addon's generated union, so a code added in Rust fails typecheck until listed here.
@@ -38,6 +40,12 @@ const GAME_ERROR_CODES: Record<NativeGameErrorCode, true> = {
   AlreadyActed: true,
   NoMajority: true,
   ActionsIncomplete: true,
+  CannotVote: true,
+  NoLastWords: true,
+  NominationsOpen: true,
+  NominationsClosed: true,
+  NotACandidate: true,
+  NotTheSheriff: true,
   GameOver: true,
 };
 
@@ -79,9 +87,19 @@ function attempt<T>(call: () => T): T {
 export type NightResolution =
   | { kind: "Dawn"; saved: number | null; deaths: number[] }
   | { kind: "NoConsensus"; targets: number[] }
-  | { kind: "AwaitingWitch" };
+  | { kind: "AwaitingWitch" }
+  | { kind: "Election" };
 
-export type DayResolution = { kind: "Eliminated"; eliminated: number } | { kind: "Tied" };
+export type DayResolution =
+  | { kind: "Eliminated"; eliminated: number }
+  | { kind: "FoolRevealed"; fool: number }
+  | { kind: "Tied" };
+
+// The election also carries the Night 1 report it delayed.
+export type SheriffResolution = ({ kind: "Elected"; sheriff: number } | { kind: "Tied" }) & {
+  saved: number | null;
+  deaths: number[];
+};
 
 function isSeat(value: unknown): value is number {
   return typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
@@ -93,6 +111,7 @@ function isSeats(value: unknown): value is number[] {
 
 function normalizeNight(result: NightResult): NightResolution {
   if (result?.kind === "AwaitingWitch") return { kind: "AwaitingWitch" };
+  if (result?.kind === "Election") return { kind: "Election" };
   if (result?.kind === "Dawn" && isSeats(result.deaths) && (result.saved == null || isSeat(result.saved))) {
     const saved = result.saved ?? null;
     // The engine never reports nobody attacked, nor a saved player among the dead.
@@ -111,7 +130,19 @@ function normalizeDay(result: DayResult): DayResolution {
   if (result?.kind === "Eliminated" && isSeat(result.eliminated)) {
     return { kind: "Eliminated", eliminated: result.eliminated };
   }
+  if (result?.kind === "FoolRevealed" && isSeat(result.fool))
+    return { kind: "FoolRevealed", fool: result.fool };
   throw new GameError("Unknown", "Invalid day resolution from native addon");
+}
+
+function normalizeSheriff(result: SheriffResult): SheriffResolution {
+  if (isSeats(result?.deaths) && (result.saved == null || isSeat(result.saved))) {
+    const report = { saved: result.saved ?? null, deaths: result.deaths };
+    if (result.kind === "Tied" && result.sheriff == null) return { kind: "Tied", ...report };
+    if (result.kind === "Elected" && isSeat(result.sheriff))
+      return { kind: "Elected", sheriff: result.sheriff, ...report };
+  }
+  throw new GameError("Unknown", "Invalid sheriff resolution from native addon");
 }
 
 export class Game {
@@ -127,6 +158,10 @@ export class Game {
 
   static withRoles(roles: Role[]): Game {
     return Game.fromNative(attempt(() => NativeGame.withRoles(roles)));
+  }
+
+  static withRuleset(roles: Role[], ruleset: Ruleset): Game {
+    return Game.fromNative(attempt(() => NativeGame.withRuleset(roles, ruleset)));
   }
 
   // Wrap an existing native instance without constructing a second game or consuming randomness.
@@ -174,6 +209,31 @@ export class Game {
 
   resolveDay(): DayResolution {
     return normalizeDay(attempt(() => this.inner.resolveDay()));
+  }
+
+  sheriffNominate(player: number, run: boolean): void {
+    attempt(() => this.inner.sheriffNominate(player, run));
+  }
+
+  sheriffWithdraw(candidate: number): void {
+    attempt(() => this.inner.sheriffWithdraw(candidate));
+  }
+
+  // Omit `successor` to tear up the badge.
+  passBadge(sheriff: number, successor?: number): void {
+    attempt(() => this.inner.passBadge(sheriff, successor));
+  }
+
+  sheriffVote(voter: number, candidate: number): void {
+    attempt(() => this.inner.sheriffVote(voter, candidate));
+  }
+
+  resolveSheriff(): SheriffResolution {
+    return normalizeSheriff(attempt(() => this.inner.resolveSheriff()));
+  }
+
+  lastWords(player: number): void {
+    attempt(() => this.inner.lastWords(player));
   }
 
   roleOf(id: number): Role {

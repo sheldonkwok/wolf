@@ -366,3 +366,109 @@ describe("CLI Witch", () => {
     },
   );
 });
+
+describe("CLI structured game", () => {
+  // P0-P3 wolves, P4-P7 villagers, P8 Seer, P9 Witch, P10 Hunter, P11 Fool.
+  const STRUCTURED = [
+    ...Array<Role>(4).fill("Werewolf"),
+    ...Array<Role>(4).fill("Villager"),
+    "Seer",
+    "Witch",
+    "Hunter",
+    "Fool",
+  ] as Role[];
+
+  function session(me: number) {
+    const source = input();
+    const game = Game.withRuleset(STRUCTURED, "Structured");
+    const log = spyOn(console, "log").mockImplementation(() => {});
+    spies.push(
+      log,
+      spyOn(process.stdout, "write").mockImplementation(() => true),
+    );
+    const table = new Table(game, new Rng(42n), me, false, source.reader);
+    const output = () => log.mock.calls.map((call) => String(call[0])).join("\n");
+    // biome-ignore-start lint/complexity/useLiteralKeys: Exercise single steps without running the entire interactive game.
+    const steps = {
+      runSheriff: () => table["runSheriff"](),
+      runDay: () => table["runDay"](),
+      runBadge: () => table["runBadge"](),
+    };
+    // biome-ignore-end lint/complexity/useLiteralKeys: Exercise single steps without running the entire interactive game.
+    return { ...source, game, output, ...steps };
+  }
+
+  // Night 1 kills Eve (seat 4) and the Witch passes, leaving the election to run.
+  function firstNight(s: ReturnType<typeof session>) {
+    for (let wolf = 0; wolf < 4; wolf++) s.game.nightAction(wolf, 4);
+    s.game.seerAction(8, 0);
+    s.game.resolveNight();
+    s.game.witchPass(9);
+    expect(s.game.resolveNight()).toEqual({ kind: "Election" });
+  }
+
+  test("the human declares, votes for a candidate, and hears the Night 1 report after the election", async () => {
+    const s = session(5);
+    firstNight(s);
+    for (const player of s.game.state().players)
+      if (player.id !== 5) s.game.sheriffNominate(player.id, player.id === 4 || player.id === 6);
+    s.send("pass\nBob\nGwen\n");
+    expect(await s.runSheriff()).toBe(true);
+    expect(s.output()).toContain("Do you run for sheriff?");
+    expect(s.output()).toContain("Candidates: Eve, Gwen");
+    expect(s.output()).toContain("not a valid choice");
+    expect(s.output()).toContain("Finn → Gwen");
+    expect(s.output()).toMatch(/is the sheriff\.|No sheriff was elected\./);
+    const report = s.output().indexOf("Sadly, Eve was eliminated during the night! (Villager)");
+    expect(report).toBeGreaterThan(s.output().indexOf("Finn → Gwen"));
+    s.close();
+  });
+
+  test("a human candidate cannot vote and a dead human sheriff passes the badge", async () => {
+    const s = session(4);
+    firstNight(s);
+    for (const player of s.game.state().players)
+      if (player.id !== 4) s.game.sheriffNominate(player.id, false);
+    s.send("run\npass\nLeo\n");
+    s.close();
+    expect(await s.runSheriff()).toBe(true);
+    expect(s.output()).toContain("Eve is the sheriff.");
+    expect(s.output()).not.toContain("Who do you vote for as sheriff?");
+    expect(s.game.state().phase).toBe("Badge");
+    expect(await s.runBadge()).toBe(true);
+    expect(s.output()).toContain("Leo is the new sheriff.");
+    expect(s.game.state().sheriff).toBe(11);
+  });
+
+  test("a revealed Fool is skipped on later ballots and Night 1 victims share last words", async () => {
+    const s = session(11);
+    firstNight(s);
+    for (const player of s.game.state().players) s.game.sheriffNominate(player.id, player.id === 0);
+    s.game.resolveSheriff();
+    for (const voter of s.game.state().players.filter((p) => p.alive)) s.game.vote(voter.id, 11);
+    s.game.resolveDay();
+    expect(s.game.state().revealedFool).toBe(11);
+    for (let wolf = 0; wolf < 4; wolf++) s.game.nightAction(wolf, 5);
+    s.game.seerAction(8, 1);
+    s.game.resolveNight();
+    s.game.witchPass(9);
+    s.game.resolveNight();
+    s.close();
+    expect(await s.runDay()).toBe(true);
+    expect(s.output()).toContain("Sheriff Alice's vote counts 1.5.");
+    expect(s.output()).not.toContain("Who do you vote for?");
+  });
+
+  test("a human Night 1 victim types their last words on Day 1", async () => {
+    const s = session(4);
+    firstNight(s);
+    for (const player of s.game.state().players) s.game.sheriffNominate(player.id, false);
+    s.game.resolveSheriff();
+    s.send("Dev is lying\n");
+    s.close();
+    expect(await s.runDay()).toBe(true);
+    expect(s.output()).toContain("Sun rises, everyone wake up!");
+    expect(s.output()).toContain("You were eliminated on the first night. Share your last words:");
+    expect(s.output()).toContain("Eve's last words: Dev is lying");
+  });
+});

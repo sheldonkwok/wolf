@@ -1,7 +1,7 @@
 // Exercise the public wrapper against the native engine and malformed boundary results.
 
 import { expect, spyOn, test } from "bun:test";
-import { Game, GameError, Rng, timeSeed } from "./engine.js";
+import { Game, GameError, Rng, type Role, timeSeed } from "./engine.js";
 import { Game as NativeGame } from "./native/index.js";
 
 function reachNight(game: Game): void {
@@ -211,7 +211,15 @@ test("error conversion validates tags and preserves typed errors", () => {
   }
 });
 
-const malformedResults: Array<["resolveDay" | "resolveNight", unknown]> = [
+const malformedResults: Array<["resolveDay" | "resolveNight" | "resolveSheriff", unknown]> = [
+  ["resolveDay", { kind: "FoolRevealed" }],
+  ["resolveDay", { kind: "FoolRevealed", fool: -1 }],
+  ["resolveSheriff", { kind: "Elected", deaths: [] }],
+  ["resolveSheriff", { kind: "Elected", sheriff: 1.5, deaths: [] }],
+  ["resolveSheriff", { kind: "Tied", sheriff: 0, deaths: [] }],
+  ["resolveSheriff", { kind: "Tied" }],
+  ["resolveSheriff", { kind: "Tied", saved: -1, deaths: [] }],
+  ["resolveSheriff", null],
   ["resolveDay", { kind: "Eliminated" }],
   ["resolveDay", { kind: "Eliminated", eliminated: null }],
   ["resolveDay", { kind: "Eliminated", eliminated: -1 }],
@@ -449,4 +457,73 @@ test("a Witch with no potions left, or no longer alive, is never awaited", () =>
   expect(grab(() => deadGame.witchHeal(0)).code).toBe("PlayerNotAlive");
   expect(deadGame.resolveNight()).toEqual({ kind: "Dawn", saved: null, deaths: [2] });
   expect(deadGame.state()).toMatchObject({ healAvailable: true, poisonAvailable: true });
+});
+
+// P0-P3 wolves, P4-P7 villagers, P8 Seer, P9 Witch, P10 Hunter, P11 Fool.
+const STRUCTURED = [
+  ...Array<Role>(4).fill("Werewolf"),
+  ...Array<Role>(4).fill("Villager"),
+  "Seer",
+  "Witch",
+  "Hunter",
+  "Fool",
+] as Role[];
+
+test("12-player deals cross the binding as structured games that open at night", () => {
+  const game = Game.withSeed(12, 3n);
+  const state = game.state();
+  expect(state.ruleset).toBe("Structured");
+  expect(state.phase).toBe("Night");
+  expect(state.players.map((p) => p.role).sort()).toEqual([...STRUCTURED].sort());
+  expect(Game.withSeed(11, 3n).state().ruleset).toBe("Standard");
+  expect(
+    grab(() => Game.withRuleset(["Werewolf", "Villager", "Villager", "Villager", "Villager"], "Structured"))
+      .code,
+  ).toBe("InvalidRoster");
+});
+
+test("the election, badge, Fool, silenced Hunter, and last words cross the binding", () => {
+  const game = Game.withRuleset(STRUCTURED, "Structured");
+  for (let wolf = 0; wolf < 4; wolf++) game.nightAction(wolf, 4);
+  game.seerAction(8, 0);
+  expect(game.resolveNight()).toEqual({ kind: "AwaitingWitch" });
+  game.witchPoison(9, 10);
+  expect(game.resolveNight()).toEqual({ kind: "Election" });
+  expect(game.state().phase).toBe("Sheriff");
+  expect(grab(() => game.sheriffVote(0, 4)).code).toBe("NominationsOpen");
+  for (const player of game.state().players)
+    game.sheriffNominate(player.id, player.id === 4 || player.id === 11);
+  let state = game.state();
+  expect(state.sheriffVoting).toBe(true);
+  expect(state.sheriffCandidates).toEqual([4, 11]);
+  expect(state.nominations).toHaveLength(12);
+  expect(state.players[4]!.canVote).toBe(false);
+  expect(grab(() => game.sheriffNominate(0, true)).code).toBe("NominationsClosed");
+  expect(grab(() => game.sheriffVote(4, 11)).code).toBe("CannotVote");
+  expect(grab(() => game.sheriffVote(0, 1)).code).toBe("NotACandidate");
+  for (let voter = 0; voter < 3; voter++) game.sheriffVote(voter, 11);
+  game.sheriffWithdraw(11);
+  expect(game.state().sheriffVotes).toEqual([]);
+  expect(game.resolveSheriff()).toEqual({ kind: "Elected", sheriff: 4, saved: null, deaths: [4, 10] });
+  state = game.state();
+  expect(state.phase).toBe("Badge");
+  expect(state.lastWords).toEqual([4, 10]);
+  expect(grab(() => game.passBadge(0, 1)).code).toBe("NotTheSheriff");
+  game.passBadge(4, 11);
+  state = game.state();
+  expect(state.phase).toBe("Day");
+  expect(state.round).toBe(1);
+  expect(state.sheriff).toBe(11);
+  expect(state.players[11]!.voteWeight).toBe(1.5);
+  expect(state.players[0]!.voteWeight).toBe(1);
+
+  for (const player of state.players.filter((p) => p.alive)) game.vote(player.id, 11);
+  expect(game.resolveDay()).toEqual({ kind: "FoolRevealed", fool: 11 });
+  state = game.state();
+  expect(state.revealedFool).toBe(11);
+  expect(state.sheriff).toBeUndefined();
+  expect(state.players[11]).toMatchObject({ alive: true, canVote: false, voteWeight: 1 });
+  expect(state.lastWords).toEqual([]);
+  expect(grab(() => game.lastWords(10)).code).toBe("NoLastWords");
+  expect(state.round).toBe(2);
 });

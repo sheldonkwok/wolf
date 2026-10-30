@@ -26,6 +26,7 @@ pub enum Role {
     Seer,
     Hunter,
     Witch,
+    Fool,
 }
 
 /// A player and everything the engine tracks about them.

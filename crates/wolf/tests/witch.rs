@@ -742,6 +742,7 @@ fn progress(g: &mut Engine, rng: &mut SplitMix64) -> Result<Option<NightOutcome>
             .hunter_action(pending[0], pick(rng, &alive))
             .map(|()| None),
         Phase::Ended => Ok(None),
+        Phase::Sheriff | Phase::Badge => unreachable!("standard games have no sheriff"),
     }
 }
 
@@ -803,7 +804,7 @@ fn check_state(g: &Engine, context: &str) {
             assert_eq!(g.role_of(pending[0]), Ok(H), "{context}");
             assert!(!g.is_alive(pending[0]), "{context}");
         }
-        Phase::Day | Phase::Night => {
+        Phase::Day | Phase::Night | Phase::Sheriff | Phase::Badge => {
             assert_eq!(g.winner(), None, "{context}");
             assert!(
                 wolves > 0 && wolves < villagers,
@@ -846,6 +847,7 @@ fn check_step(before: &Engine, after: &Engine, outcome: &Option<NightOutcome>, c
             assert_eq!(after.witch_victim(), None, "{context}");
             assert!(after.current_doctor_picks().is_empty(), "{context}");
         }
+        Some(NightOutcome::Election) => unreachable!("standard games have no election"),
         Some(NightOutcome::AwaitingWitch) => {
             assert!(died.is_empty(), "{context}");
             assert_eq!(after.phase(), Phase::Night, "{context}");

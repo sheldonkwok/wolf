@@ -1,6 +1,6 @@
 import type { App } from "@slack/bolt";
 import { Lobby } from "../lobby.js";
-import { VOTE_COMMAND, votingRules } from "./copy.js";
+import { structuredRules, VOTE_COMMAND, votingRules } from "./copy.js";
 import { roleSelection, rolesList, winningRules } from "./rules.js";
 
 export function registerHome(app: App, team: string, channel: string, bot: string): void {
@@ -30,14 +30,14 @@ export function registerHome(app: App, team: string, channel: string, bot: strin
             type: "section",
             text: {
               type: "mrkdwn",
-              text: "*Lifetime stats*\nDM `stats` for your wins, losses, and games played by team. In the game channel, use `@werewolf stats` for village vs. Werewolf win rates and the top 3 players by times assigned Werewolf. Only completed games in this channel count; dev games and bots are excluded. Doctor, Seer, Hunter, and Witch count as village team, and team wins count even if you were eliminated.",
+              text: "*Lifetime stats*\nDM `stats` for your wins, losses, and games played by team. In the game channel, use `@werewolf stats` for village vs. Werewolf win rates and the top 3 players by times assigned Werewolf. Only completed games in this channel count; dev games and bots are excluded. Doctor, Seer, Hunter, Witch, and Fool count as village team, and team wins count even if you were eliminated.",
             },
           },
           {
             type: "section",
             text: {
               type: "mrkdwn",
-              text: "*During a game*\nEvery game starts on Day 1 as soon as roles are dealt. If present, the Seer may make one private inspection during Day 1, their only daytime inspection; if Day 1 ends before they choose, it is skipped. Public messages do not reveal whether a Seer exists or has acted. Discuss and vote in the game channel during the day. Your role, the Seer's Day 1 inspection and night-action dropdowns, and the Hunter's final-shot dropdowns arrive privately in the *Messages* tab. DM `status` to recover your role, private inspection history, and current prompt.",
+              text: "*During a game*\nEvery game starts on Day 1 as soon as roles are dealt, except that 12-player games start with Night 1 and elect a sheriff the next morning. If present, the Seer may make one private inspection during Day 1, their only daytime inspection; if Day 1 ends before they choose, it is skipped. Public messages do not reveal whether a Seer exists or has acted. Discuss and vote in the game channel during the day. Your role, the Seer's Day 1 inspection and night-action dropdowns, and the Hunter's final-shot dropdowns arrive privately in the *Messages* tab. DM `status` to recover your role, private inspection history, and current prompt.",
             },
           },
           {
@@ -46,6 +46,10 @@ export function registerHome(app: App, team: string, channel: string, bot: strin
               type: "mrkdwn",
               text: `*Day voting*\nVote publicly with ${VOTE_COMMAND}. ${votingRules()} Votes reset each day.`,
             },
+          },
+          {
+            type: "section",
+            text: { type: "mrkdwn", text: `*12-player structured rules*\n${structuredRules()}` },
           },
           {
             type: "section",

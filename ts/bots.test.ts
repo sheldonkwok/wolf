@@ -4,8 +4,12 @@
 import { expect, spyOn, test } from "bun:test";
 
 import {
+  ballotClosed,
   botDayVotes,
   botNightActions,
+  botPassBadge,
+  botSheriffNominations,
+  botSheriffVotes,
   botWitchAction,
   livingIds,
   pick,
@@ -13,7 +17,7 @@ import {
   randomLivingVillager,
   villagerBotVote,
 } from "./bots.js";
-import { Game, type GameState, Rng } from "./engine.js";
+import { Game, type GameState, Rng, type Role } from "./engine.js";
 
 // Wolves at seats 0 and 5, villagers elsewhere — no one eliminated.
 function roster(): GameState {
@@ -177,4 +181,58 @@ test("a bot witch never poisons herself and only heals a victim she can see", ()
   for (let n = 0; n < 500; n++)
     botWitchAction(game, { ...state, witchVictim: undefined, poisonAvailable: false }, rng, 1);
   expect(poison).not.toHaveBeenCalled();
+});
+
+test("bots declare, vote only for candidates, wolves back a packmate, and a revealed Fool never votes by day", () => {
+  const roles = [
+    ...Array<Role>(4).fill("Werewolf"),
+    ...Array<Role>(4).fill("Villager"),
+    "Seer",
+    "Witch",
+    "Hunter",
+    "Fool",
+  ] as Role[];
+  const everyone = () => true;
+  let contested = 0;
+  for (let seed = 0n; seed < 50n; seed++) {
+    const game = Game.withRuleset(roles, "Structured");
+    const rng = new Rng(seed);
+    for (let wolf = 0; wolf < 4; wolf++) game.nightAction(wolf, 4);
+    game.seerAction(8, 0);
+    game.resolveNight();
+    game.witchPass(9);
+    expect(game.resolveNight()).toEqual({ kind: "Election" });
+    botSheriffNominations(game, rng, everyone, () => {});
+    const state = game.state();
+    expect(state.sheriffVoting).toBe(true);
+    const candidates = state.sheriffCandidates;
+    const votes: Array<[number, number]> = [];
+    botSheriffVotes(game, rng, everyone, null, (voter, candidate) => votes.push([voter, candidate]));
+    expect(ballotClosed(game.state())).toBe(true);
+    if (candidates.length > 1) contested++;
+    for (const [voter, candidate] of votes) {
+      expect(candidates).toContain(candidate);
+      expect(candidates).not.toContain(voter);
+      if (voter < 4 && candidates.some((id) => id < 4)) expect(candidate).toBeLessThan(4);
+    }
+    const election = game.resolveSheriff();
+    if (game.state().phase === "Badge") {
+      const successor = botPassBadge(game, rng, 4);
+      expect(game.state().sheriff).toBe(successor);
+    }
+    expect(election.deaths).toEqual([4]);
+    for (const player of game.state().players.filter((p) => p.alive)) game.vote(player.id, 11);
+    expect(game.resolveDay()).toEqual({ kind: "FoolRevealed", fool: 11 });
+    for (let wolf = 0; wolf < 4; wolf++) game.nightAction(wolf, 5);
+    game.seerAction(8, 1);
+    game.resolveNight();
+    game.witchPass(9);
+    game.resolveNight();
+    if (game.state().phase === "Badge") botPassBadge(game, rng, game.state().pendingActors[0]!);
+    const voters: number[] = [];
+    botDayVotes(game, rng, everyone, null, (voter) => voters.push(voter));
+    expect(voters).not.toContain(11);
+    expect(ballotClosed(game.state())).toBe(true);
+  }
+  expect(contested).toBeGreaterThan(10);
 });
